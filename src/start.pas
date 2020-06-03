@@ -1,9 +1,12 @@
 unit start;
+
 {$ifdef FPC}
-  {$mode delphi}{$H+}
+{$mode delphi}
+{$H+}{$J-}
 {$endif}
 
 interface
+
 uses Classes, SysUtils, ast, cntx, parser;
 
 procedure StartCompile;
@@ -12,38 +15,30 @@ implementation
 
 uses llvm_codegen, dump;
 
-function ExecProcess(const Cmd: string): Integer;
+function ExecProcess(const Cmd: string): integer;
 begin
-{$ifdef FPC}
-  Result := Executeprocess(Cmd, '')
-{$else}
-// win delphi
-  WinExec
-{$endif}
+  Result := ExecuteProcess(Cmd, '');
 end;
 
 type
   EOptionError = class(Exception);
 
-  { TCompiler }
-
   TCompiler = class
   private
-    FTools_LL2BC, FTools_LL2Obj,
-    FTools_LL2Asm, FTools_BC2Asm, FTools_Link: string;
-    FDump, FDumpCode: Boolean;
-    FEmitLLVM: Boolean;  // -emit-llvm
-    FParseOnly: Boolean; // -E
-    FCompileToObj: Boolean; // -c
-    FCompileToAsm: Boolean; // -S
-    FIsSystemUnit: Boolean; // -sys-unit
-    FOptLevel: 0..2;
+    FTools_LL2BC, FTools_LL2Obj, FTools_LL2Asm, FTools_BC2Asm, FTools_Link: string;
+    FDump, FDumpCode: boolean;
+    FEmitLLVM: boolean;
+    FParseOnly: boolean;
+    FCompileToObj: boolean;
+    FCompileToAsm: boolean;
+    FIsSystemUnit: boolean;
+    FOptLevel: 0..3;
+    FOptCPU: String;
     FSource: string;
     FLibDirs, FIncDirs: TStringList;
     FUnitOutputDir: string;
     FExeOutputDir: string;
     FLLVMTarget: string;
-
     FLLCodeFile: string;
     procedure OnError(ErrInfo: TParserErrorInfo);
     procedure LoadConfig;
@@ -66,13 +61,25 @@ begin
   Compiler.Free;
 end;
 
-{ TCompiler }
-
 constructor TCompiler.Create;
 begin
   FLibDirs := TStringList.Create;
   FIncDirs := TStringList.Create;
-  FLLVMTarget := 'i686-pc-mingw32';
+  //note that what FPC calls '386' is more often called '686' nowadays
+  {$ifdef CPU386}
+  {$ifdef WINDOWS}
+  FLLVMTarget := 'i686-pc-windows-gnu';
+  {$else}
+  FLLVMTarget := 'i686-unknown-linux-gnu';
+  {$endif}
+  {$endif}
+  {$ifdef CPU64}
+  {$ifdef WINDOWS}
+  FLLVMTarget := 'x86_64-pc-windows-gnu';
+  {$else}
+  FLLVMTarget := 'x86_64-unknown-linux-gnu';
+  {$endif}
+  {$endif}
 end;
 
 destructor TCompiler.Destroy;
@@ -85,7 +92,7 @@ end;
 procedure TCompiler.DoCompile;
 var
   Context: TCompileContext;
-  LibDir: string;
+  {LibDir: string;}
   M: TModule;
 
   procedure DoGenLLCode(M: TModule);
@@ -100,7 +107,8 @@ var
       cg.EmitModuleDecl(M);
       if Self.FUnitOutputDir = '' then
         FLLCodeFile := ChangeFileExt(FSource, '.ll')
-      else begin
+      else
+      begin
         FLLCodeFile := FUnitOutputDir + ExtractFileName(FSource);
         FLLCodeFile := ChangeFileExt(FSource, '.ll');
       end;
@@ -126,14 +134,15 @@ var
     infn := '"' + input + '"';
     outfn := '"' + ChangeFileExt(input, outext) + '"';
     opt := IntToStr(FOptLevel);
-
+    if FOptCPU <> '' then
+      cmd += (' ' + FOptCPU + ' ');
     cmd := StringReplace(cmd, '%%input', infn, [rfReplaceAll]);
     cmd := StringReplace(cmd, '%%output', outfn, [rfReplaceAll]);
     cmd := StringReplace(cmd, '%%opt', opt, []);
     Result := cmd;
   end;
 
-  function LLToObj: Integer;
+  function LLToObj: integer;
   begin
     if Self.FEmitLLVM then
       Result := ExecProcess(GetCmd(FTools_LL2BC, FLLCodeFile, '.bc'))
@@ -141,7 +150,7 @@ var
       Result := ExecProcess(GetCmd(FTools_LL2Obj, FLLCodeFile, '.o'));
   end;
 
-  function LLToAsm: Integer;
+  function LLToAsm: integer;
   begin
     if not Self.FEmitLLVM then
       Result := ExecProcess(GetCmd(FTools_LL2Asm, FLLCodeFile, '.s'));
@@ -151,22 +160,17 @@ var
   var
     objfn, outfn, path, sysobj: string;
   begin
-    // 暂时
     objfn := '"' + ChangeFileExt(FLLCodeFile, '.o') + '"';
     if FExeOutputDir = '' then
       path := ExtractFilePath(FSource)
     else
       path := FExeOutputDir;
+    {$ifdef Windows}
     outfn := '"' + path + ChangeFileExt(ExtractFileName(FSource), '.exe') + '"';
-    path := ExtractFilePath(ParamStr(0));
-    path := SysUtils.ExcludeTrailingPathDelimiter(path);
-    path := ExtractFilePath(path);
-    path := path + 'lib' + SysUtils.PathDelim + 'i386-win32' +
-            SysUtils.PathDelim + 'rtl' +
-            SysUtils.PathDelim;
-    sysobj := '"' + path + 'system.o" "' + path + 'ex.o"';
-
-    //FTools_Link
+    {$else}
+    outfn := '"' + path + ChangeFileExt(ExtractFileName(FSource), '') + '"';
+    {$endif}
+    sysobj := 'system.o';
     ExecProcess(FTools_Link + ' ' + objfn + ' ' + sysobj + ' -o ' + outfn);
   end;
 
@@ -187,10 +191,11 @@ var
   procedure DoDumpCode(M: TModule);
   begin
     Writeln(M.Codes);
+    Writeln(M.Dump);
   end;
 
 var
-  ok: Boolean;
+  ok: boolean;
 begin
   WriteLn('Compile ' + ExtractFileName(FSource) + ' ...');
   try
@@ -199,19 +204,14 @@ begin
     try
       if FLibDirs.Count = 0 then
       begin
-        LibDir := ExtractFilePath(ParamStr(0));
-        LibDir := ExtractFilePath(ExcludeTrailingPathDelimiter(LibDir));
-        LibDir := LibDir + 'lib' + PathDelim;
-        FLibDirs.Add(LibDir);
+        FLibDirs.Add(GetCurrentDIr);
       end;
       Context.LibDirs.Assign(FLibDirs);
       Context.IncDirs.Assign(FIncDirs);
       Context.UnitOutputDir := FUnitOutputDir;
       Context.IsSystemUnit := FIsSystemUnit;
-
       Context.OnError := OnError;
       M := Context.Compile(FSource);
-
       if not FParseOnly and not Context.HasError then
       begin
         DoGenLLCode(M);
@@ -219,7 +219,6 @@ begin
           ok := LLToObj = 0
         else
           ok := LLToAsm = 0;
-
         if ok and not FCompileToAsm and not FCompileToObj and (M.Kind = mkProgram) then
         begin
           Link;
@@ -238,19 +237,17 @@ begin
     end;
     System.ExitCode := 0;
   except
-    on E: EParseStop do ; // In OnError
     on E: Exception do
     begin
       WriteLn(E.Message);
       DumpExceptionBackTrace(stdout);
-    //  dump_stack(stdout,get_caller_frame(get_frame));
     end;
   end;
 end;
 
 procedure TCompiler.LoadCommandOptions;
 var
-  Count, I: Integer;
+  Count, I: integer;
   Opts: TStringList;
   S, fn: string;
 begin
@@ -261,21 +258,19 @@ begin
     for I := 1 to Count do
     begin
       S := Trim(ParamStr(I));
-      if S = '' then Continue;
-
+      if S = '' then
+        Continue;
       if S[1] = '-' then
         Opts.Add(S)
-      else if fn = '' then
+      else
+      if fn = '' then
         fn := S
       else
         raise EOptionError.Create('Only one source file supported');
     end;
-
     if fn = '' then
       raise EOptionError.Create('source file required');
-
     Self.FSource := fn;
-
     ProcessOptions(Opts);
   finally
     Opts.Free;
@@ -291,11 +286,12 @@ const
     procedure Add(const s: string);
     var
       n: string;
-      i: Integer;
+      i: integer;
     begin
       n := s;
       i := Length(n);
-      while i > 0 do
+      while
+        i > 0 do
       begin
         if n[i] = '"' then
         begin
@@ -309,22 +305,20 @@ const
     end;
 
   var
-    i, p1, len: Integer;
+    i, p1, len: integer;
     s: string;
-    inDblQuot: Boolean;
+    inDblQuot: boolean;
   begin
     p1 := 1;
     inDblQuot := False;
     i := 1;
     len := Length(line);
-    // 访问i+1位置的字符是安全的，因为string有个结束字符#0
     while i <= len do
     begin
       if (line[i] in WhiteSpaceChars) and not inDblQuot then
       begin
         s := Copy(line, p1, i - p1);
         Add(s);
-        // 跳过空白
         while line[i] in WhiteSpaceChars do
           Inc(i);
         p1 := i;
@@ -334,9 +328,9 @@ const
       begin
         if not inDblQuot then
           inDblQuot := True
-        else if line[i + 1] <> '"' then
+        else if ((i + 1) >= len) or (line[i + 1] <> '"') then
           inDblQuot := False
-        else  // 两个双引号
+        else
           Inc(i);
       end;
       Inc(i);
@@ -346,17 +340,18 @@ const
       s := Copy(line, p1, i - p1);
       Add(s);
     end;
-    if inDblQuot then raise Exception.Create('double quots mismatch');
+    if inDblQuot then
+      raise Exception.Create('double quots mismatch');
   end;
 
 var
   cfgFn, line: string;
-  lineno: Integer;
+  lineno: integer;
   cfgLines, Opts: TStringList;
 begin
-  cfgFn := ChangeFileExt(ParamStr(0), '.cfg');
-  if not FileExists(cfgFn) then Exit;
-
+  cfgFn := GetCurrentDir + DirectorySeparator + 'lpc.cfg';
+  if not FileExists(cfgFn) then
+    Exit;
   cfgLines := TStringList.Create;
   Opts := TStringList.Create;
   try
@@ -366,7 +361,6 @@ begin
       line := Trim(cfgLines[lineno]);
       if (line = '') or (line[1] = '#') then
         Continue;
-
       try
         ParseLine(line, Opts);
       except
@@ -377,7 +371,6 @@ begin
         end;
       end;
     end;
-
     ProcessOptions(Opts);
   finally
     Opts.Free;
@@ -387,27 +380,24 @@ end;
 
 procedure TCompiler.OnError(ErrInfo: TParserErrorInfo);
 const
-  Levels: array[TErrorLevel] of string = (
-    'Error', 'Warning', 'Hint'
-  );
+  Levels: array[TErrorLevel] of string = ('Error', 'Warning', 'Hint');
 var
   Msg: string;
 begin
-  Msg := Format('%s %s(%d,%d): %s', [Levels[ErrInfo.ErrorLevel],
-            ExtractFileName(ErrInfo.FileName),
-            ErrInfo.Row, ErrInfo.Column, ErrInfo.ErrorMessage]);
+  Msg := Format('%s %s(%d,%d): %s', [Levels[ErrInfo.ErrorLevel], ExtractFileName(ErrInfo.FileName),
+    ErrInfo.Row, ErrInfo.Column, ErrInfo.ErrorMessage]);
   WriteLn(Msg);
 end;
 
 procedure TCompiler.ProcessOptions(Opts: TStringList);
 
-  procedure CheckTools(const s: string; i: Integer);
+  procedure CheckTools(const s: string; i: integer);
   begin
     if i >= Opts.Count then
       raise EOptionError.CreateFmt('%s option require a command', [s]);
   end;
 
-  function StartWith(const s, sub: string): Boolean;
+  function StartWith(const s, sub: string): boolean;
   begin
     if sub <> '' then
     begin
@@ -417,7 +407,7 @@ procedure TCompiler.ProcessOptions(Opts: TStringList);
       Result := True;
   end;
 
-  function CheckPathOption(const s, opt: string; var path: string): Boolean;
+  function CheckPathOption(const s, opt: string; var path: string): boolean;
   begin
     if StartWith(s, opt) then
     begin
@@ -429,7 +419,7 @@ procedure TCompiler.ProcessOptions(Opts: TStringList);
   end;
 
 var
-  i: Integer;
+  i: integer;
   s, fn: string;
 begin
   fn := '';
@@ -441,6 +431,8 @@ begin
       Self.FCompileToObj := True
     else if s = '-S' then
       Self.FCompileToAsm := True
+    else if s = '-Sys' then
+      Self.FIsSystemUnit := True
     else if s = '-E' then
       Self.FParseOnly := True
     else if s = '-dump' then
@@ -449,10 +441,15 @@ begin
       Self.FDumpCode := True
     else if s = '-O0' then
       Self.FOptLevel := 0
-    else if s = '-O1' then
+    else
+    if s = '-O1' then
       Self.FOptLevel := 1
     else if s = '-O2' then
       Self.FOptLevel := 2
+    else if s = '-O3' then
+      Self.FOptLevel := 3
+    else if S.Contains('-march=') then
+      Self.FOptCPU := S
     else if s = '-emit-llvm' then
       Self.FEmitLLVM := True
     else if s = '-sys-unit' then
@@ -463,7 +460,8 @@ begin
     end
     else if CheckPathOption(s, '-Fl', fn) then
     begin
-      FLibDirs.Add(IncludeTrailingPathDelimiter(ExpandFileName(fn)));
+      FLibDirs.
+        Add(IncludeTrailingPathDelimiter(ExpandFileName(fn)));
     end
     else if CheckPathOption(s, '-FU', fn) then
     begin
@@ -479,7 +477,8 @@ begin
     end
     else if CheckPathOption(s, '-tools-ll2obj', fn) then
     begin
-      FTools_LL2Obj := (fn);
+      FTools_LL2Obj :=
+        (fn);
     end
     else if CheckPathOption(s, '-tools-ll2asm', fn) then
     begin
@@ -498,23 +497,21 @@ begin
       FLLVMTarget := fn;
     end
     else
-      raise EOptionError.CreateFmt('invalid option %s', [s]);
+      raise
+      EOptionError.CreateFmt('invalid option %s', [s]);
     Inc(i);
   end;
 end;
 
 procedure TCompiler.Run;
 begin
-//  test;
   WriteLn('Light Pascal Compiler');
   if ParamCount < 1 then
   begin
     ShowHelp;
     Exit;
   end;
-
   System.ExitCode := 1;
-
   try
     LoadConfig
   except
@@ -524,7 +521,6 @@ begin
       Exit;
     end;
   end;
-
   try
     LoadCommandOptions;
   except
@@ -534,23 +530,22 @@ begin
       Exit;
     end;
   end;
-
   DoCompile;
-
-//  ReadLn;
 end;
 
 procedure TCompiler.ShowHelp;
 begin
   WriteLn('Usage: lpc [options] filename [options]');
   WriteLn('Options:');
-  WriteLn(' -E           Compile source, not .o or .s file generated');
+  WriteLn(' -E           Compile source, no .o or .s file generated');
   WriteLn(' -c           Compile source, generate object .o file');
   WriteLn(' -S           Compile source, generate asm .s file');
-  WriteLn(' -O<n>        Optimization level. n: 0-2');
+  WriteLn(' -Sys         Compile a system unit');
+  WriteLn(' -O<n>        Optimization level. n: 0-3');
+  WriteLn(' -march=<cpu> CPU to optimize for');
   WriteLn(' -dump        Dump AST nodes');
-  WriteLn(' -dump-code   Dump IL code or C++ code to stdout');
-  WriteLn(' -emit-llvm   Keep .ll file not delete');
+  WriteLn(' -dump-code   Dump IL code to stdout');
+  WriteLn(' -emit-llvm   Keep .ll file');
   WriteLn(' -llvm-target llvm IL code''s target');
 end;
 

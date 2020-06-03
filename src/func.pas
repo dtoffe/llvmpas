@@ -1,9 +1,12 @@
 unit func;
+
 {$ifdef FPC}
-{$mode delphi}{$H+}
+{$mode delphi}
+{$H+}{$J-}
 {$endif}
 
 interface
+
 uses Classes, SysUtils, ast, parser;
 
 procedure CheckFunction(Parser: TParser; Func: TFunction);
@@ -11,39 +14,30 @@ procedure CheckFunction(Parser: TParser; Func: TFunction);
 implementation
 
 type
-  TVisitorProc = procedure (Stmt: TStatement; Data: Pointer);
+  TVisitorProc = procedure(Stmt: TStatement; Data: Pointer);
 
 procedure ForEach(Stmt: TStatement; Proc: TVisitorProc; Data: Pointer);
 var
-  i: Integer;
+  i: integer;
 begin
-  if Stmt = nil then Exit;
-
+  if Stmt = nil then
+    Exit;
   Proc(Stmt, Data);
   case Stmt.StmtKind of
-    skCompoundStmt:
-      for i := 0 to TCompoundStmt(Stmt).Statements.Count - 1 do
+    skCompoundStmt: for i := 0 to TCompoundStmt(Stmt).Statements.Count - 1 do
         ForEach(TStatement(TCompoundStmt(Stmt).Statements[i]), Proc, Data);
-
-    skIfStmt: begin
+    skIfStmt:
+    begin
       ForEach(TIfStmt(Stmt).TrueStmt, Proc, Data);
       ForEach(TIfStmt(Stmt).FalseStmt, Proc, Data);
     end;
-
-    skCaseStmt:
-      for i := 0 to TCaseStmt(Stmt).Count - 1 do
+    skCaseStmt: for i := 0 to TCaseStmt(Stmt).Count - 1 do
         ForEach(TCaseStmt(Stmt).Selectors[i].Stmt, Proc, Data);
-
-    skForStmt:
-      ForEach(TForStmt(Stmt).Stmt, Proc, Data);
-
-    skWhileStmt:
-      ForEach(TWhileStmt(Stmt).Stmt, Proc, Data);
-
-    skRepeatStmt:
-      ForEach(TRepeatStmt(Stmt).Stmt, Proc, Data);
-
-    skTryStmt: begin
+    skForStmt: ForEach(TForStmt(Stmt).Stmt, Proc, Data);
+    skWhileStmt: ForEach(TWhileStmt(Stmt).Stmt, Proc, Data);
+    skRepeatStmt: ForEach(TRepeatStmt(Stmt).Stmt, Proc, Data);
+    skTryStmt:
+    begin
       ForEach(TTryStmt(Stmt).Stmt, Proc, Data);
       ForEach(TTryStmt(Stmt).FinallyStmt, Proc, Data);
       if TTryStmt(Stmt).ExceptBlock <> nil then
@@ -56,25 +50,22 @@ begin
   end;
 end;
 
-function GetUpward(Stmt: TStatement; out Index: Integer): TStatement;
+function GetUpward(Stmt: TStatement; out Index: integer): TStatement;
 var
   Parent, Child: TStatement;
 begin
   Parent := Stmt.Parent;
   Child := Stmt;
-  while (Parent <> nil ) and (Parent.StmtKind <> skCompoundStmt) do
+  while (Parent <> nil) and (Parent.StmtKind <> skCompoundStmt) do
   begin
     Child := Parent;
     Parent := Parent.Parent;
   end;
-
-  if parent = nil then 
+  if parent = nil then
   begin
     Result := nil;
     Exit;
   end;
-// 此处需要调整TParser分析Statement的结构
-// 确保Statement.Parent一定是TCompoundStmt
   Index := TCompoundStmt(Parent).Statements.IndexOf(Child);
   Result := Parent;
   Assert(Index >= 0, 'StartIndex < 0');
@@ -82,14 +73,14 @@ end;
 
 type
   TVarList = array of TSymbol;
-  TVarStates = array of Boolean;
+  TVarStates = array of boolean;
 
   TPathInfo = class
   public
     GotoStmt: TGotoStmt;
     Stmt: TCompoundStmt;
     LabStmt: TLabeledStmt;
-    StartIndex: Integer;
+    StartIndex: integer;
     States: TVarStates;
   end;
 
@@ -104,26 +95,22 @@ type
     FParser: TParser;
     FFunc: TFunction;
     FVarList: TVarList;
-    FVarCount: Integer;
+    FVarCount: integer;
     FStates, FKeepStates: array of TVarStates;
-    FStateCount, FKeepStateCount: Integer;
-    FStmtStack: TList;
-    FPaths: TList;
-    FFinallyBlocks: TList;
-    FNoinitVars: TList;
-    FNoassignVars: TList;
-    FErrGotos: TList;
+    FStateCount, FKeepStateCount: integer;
+    FStmtStack: TFPList;
+    FPaths: TFPList;
+    FFinallyBlocks: TFPList;
+    FNoinitVars: TFPList;
+    FNoassignVars: TFPList;
+    FErrGotos: TFPList;
     FStmt: TStatement;
-    FStartIndex: Integer; // 如果Stmt是skCompoundStmt，则从StartIndex的位置开始
-
-    FUpward: Boolean;
+    FStartIndex: integer;
+    FUpward: boolean;
     FCurLoopStmt: TStatement;
-
     FResultVar: TSymbol;
-    // Out参数和 Result
     FReturnVars: array of TSymbol;
-    FReturnVarCount: Integer;
-
+    FReturnVarCount: integer;
     procedure AddPath(GotoStmt: TGotoStmt; States: TVarStates);
     procedure AddVar(Sym: TSymbol);
     procedure AddNoinit(Sym: TSymbol);
@@ -135,12 +122,11 @@ type
     procedure PushStates;
     procedure PopStates;
     procedure KeepStates(const s: TVarStates);
-    function IsInit(Sym: TSymbol): Boolean;
-    procedure SetInit(Sym: TSymbol; Value: Boolean);
-    function ExistsInStack(Stmt: TStatement): Boolean;
+    function IsInit(Sym: TSymbol): boolean;
+    procedure SetInit(Sym: TSymbol; Value: boolean);
+    function ExistsInStack(Stmt: TStatement): boolean;
     function LastStates: TVarStates;
     procedure Prepare;
-
     procedure CheckAssignStmt(Stmt: TAssignmentStmt);
     procedure CheckTryStmt(Stmt: TTryStmt);
     procedure CheckGotoStmt(Stmt: TGotoStmt);
@@ -150,34 +136,25 @@ type
     procedure CheckForStmt(Stmt: TForStmt);
     procedure CheckIfStmt(Stmt: TIfStmt);
     procedure CheckCaseStmt(Stmt: TCaseStmt);
-//    procedure CheckRaiseStmt(Stmt: TRaiseStmt);
     procedure CheckCallStmt(Stmt: TCallStmt);
     procedure CheckLabelStmt(Stmt: TLabeledStmt);
     procedure CheckStmt(Stmt: TStatement);
     procedure CheckVarRef(E: TExpr);
     procedure CheckReturnVars;
-
   public
     constructor Create;
     destructor Destroy; override;
-
     procedure CheckMain;
   end;
 
 type
-  TIncludeResult = (
-    irSubset = 0,    // S1是S2子集
-    irEquals = 1,     // S1 = S2
-    irSuperset = 2,   // S1是S2超集
-    irOther = 3    // 不属于上三种情况，可以是有交集或无交集
-  );
+  TIncludeResult = (irSubset = 0, irEquals = 1, irSuperset = 2, irOther = 3);
 
 function StateInclude(S1, S2: TVarStates): TIncludeResult;
 var
-  i: Integer;
+  i: integer;
 begin
   Assert(High(S1) = High(S2), 'StateComp');
-
   Result := irEquals;
   for i := Low(S1) to High(S1) do
     if S1[i] < S2[i] then
@@ -198,44 +175,20 @@ begin
       end;
       Result := irSuperset;
     end;
-
 end;
 
 procedure StateUnion(S1, S2: TVarStates);
 var
-  i: Integer;
+  i: integer;
 begin
   for i := Low(S1) to High(S2) do
     S1[i] := S1[i] or S2[i];
 end;
 
-(*function StateComp(S1, S2: TVarStates): Integer;
-var
-  i: Integer;
-begin
-// 有问题的
-  Assert(High(S1) = High(S2), 'StateComp');
-  for i := Low(S1) to High(S1) do
-    if S1[i] < S2[i] then
-    begin
-      Result := -1;
-      Exit;
-    end
-    else if S1[i] > S2[i] then
-    begin
-      Result := -2;
-      Exit;
-    end;
-
-  Result := 0;
-end;  *)
-
-{ TCheckData }
-
 procedure TCheckData.AddErrGoto(S: TGotoStmt);
 begin
   if FErrGotos = nil then
-    FErrGotos := TList.Create;
+    FErrGotos := TFPList.Create;
   if FErrGotos.IndexOf(S) < 0 then
     FErrGotos.Add(S);
 end;
@@ -243,7 +196,7 @@ end;
 procedure TCheckData.AddNoassign(Sym: TSymbol);
 begin
   if FNoassignVars = nil then
-    FNoassignVars := TList.Create;
+    FNoassignVars := TFPList.Create;
   if FNoassignVars.IndexOf(Sym) < 0 then
     FNoassignVars.Add(Sym);
 end;
@@ -251,23 +204,24 @@ end;
 procedure TCheckData.AddNoinit(Sym: TSymbol);
 begin
   if FNoinitVars = nil then
-    FNoinitVars := TList.Create;
+    FNoinitVars := TFPList.Create;
   if FNoinitVars.IndexOf(Sym) < 0 then
     FNoinitVars.Add(Sym);
 end;
 
 procedure TCheckData.AddPath(GotoStmt: TGotoStmt; States: TVarStates);
 
-  function FindPath(S: TStatement; StartIndex: Integer; States: TVarStates): Boolean;
+  function FindPath(S: TStatement; StartIndex: integer; States: TVarStates): boolean;
   var
-    i: Integer;
+    i: integer;
     Path: TPathInfo;
   begin
-    for i := 0 to FPaths.Count - 1 do
+    for i := 0 to
+      FPaths.Count - 1 do
     begin
       Path := TPathInfo(FPaths[i]);
-      if (Path.Stmt = S) and (Path.StartIndex <= Path.StartIndex)
-        and (StateInclude(Path.States, States) in [irSubset, irEquals]) then
+      if (Path.Stmt = S) and (Path.StartIndex <= Path.StartIndex) and
+        (StateInclude(Path.States, States) in [irSubset, irEquals]) then
       begin
         Result := True;
         Exit;
@@ -275,18 +229,17 @@ procedure TCheckData.AddPath(GotoStmt: TGotoStmt; States: TVarStates);
     end;
     Result := False;
   end;
+
 var
   Path: TPathInfo;
   UpStmt: TStatement;
-  Index: Integer;
+  Index: integer;
 begin
-  // GotoStmt.StmtLabel.Stmt 有可能为nil
-  if GotoStmt.StmtLabel.Stmt = nil then Exit;
-
+  if GotoStmt.StmtLabel.Stmt = nil then
+    Exit;
   UpStmt := GetUpward(GotoStmt.StmtLabel.Stmt, Index);
-
-  if FindPath(UpStmt, Index, States) then Exit;
-
+  if FindPath(UpStmt, Index, States) then
+    Exit;
   Path := TPathInfo.Create;
   Path.GotoStmt := GotoStmt;
   Path.LabStmt := GotoStmt.StmtLabel.Stmt;
@@ -316,7 +269,6 @@ procedure TCheckData.CheckAssignStmt(Stmt: TAssignmentStmt);
 
   function GetRef(E: TExpr): TSymbol;
   begin
-    // 考虑到Cast的影响。
     while E.OpCode = opCAST do
     begin
       E := TBinaryExpr(E).Right;
@@ -345,19 +297,10 @@ end;
 
 procedure TCheckData.CheckCallStmt(Stmt: TCallStmt);
 
-  // 执行FinallyBlock，但不超过TopStmt;
   procedure CheckFinallyBlock(TopStmt: TStatement);
 
-    function IsParentTopStmt(T: TStatement): Boolean;
+    function IsParentTopStmt(T: TStatement): boolean;
     begin
-      // 检查T 的上级有没有TopStmt
-      //，如果T = nil，返回True
-      {if T = nil then
-      begin
-        Result := True;
-        Exit;
-      end;}
-
       while T <> nil do
       begin
         if T = TopStmt then
@@ -369,21 +312,22 @@ procedure TCheckData.CheckCallStmt(Stmt: TCallStmt);
       end;
       Result := False;
     end;
+
   var
-    i: Integer;
+    i: integer;
     LStmt: TTryStmt;
   begin
     for i := FFinallyBlocks.Count - 1 downto 0 do
     begin
       LStmt := TTryStmt(FFinallyBlocks[i]);
       assert(LStmt.FinallyStmt <> nil, 'CheckFinallyBlock');
-      if (TopStmt <> nil) and not IsParentTopStmt(LStmt) then Break;
-
+      if (TopStmt <> nil) and not IsParentTopStmt(LStmt) then
+        Break;
       CheckStmt(LStmt.FinallyStmt);
     end;
   end;
 
-  function CheckContinueBreakExit(CallStmt: TCallStmt): Boolean;
+  function CheckContinueBreakExit(CallStmt: TCallStmt): boolean;
   var
     Ref: TSymbol;
   begin
@@ -395,37 +339,35 @@ procedure TCheckData.CheckCallStmt(Stmt: TCallStmt);
       begin
         case TBuiltinFunction(Ref).Kind of
           bfContinue, bfBreak:
-            begin
-              assert(FCurLoopStmt <> nil, 'CheckContinueBreakExit');
-              CheckFinallyBlock(FCurLoopStmt);
-              if (FCurLoopStmt <> nil) and (FCurLoopStmt.StmtKind = skRepeatStmt) then
-                CheckVarRef(TRepeatStmt(FCurLoopStmt).Condition);
-              Result := True;
-              if TBuiltinFunction(Ref).Kind = bfContinue then
-                Include(Stmt.Attr, stmtContinue)
-              else
-                Include(Stmt.Attr, stmtBreak);
-            end;
+          begin
+            assert(FCurLoopStmt <> nil, 'CheckContinueBreakExit');
+            CheckFinallyBlock(FCurLoopStmt);
+            if (FCurLoopStmt <> nil) and (FCurLoopStmt.StmtKind = skRepeatStmt) then
+              CheckVarRef(TRepeatStmt(FCurLoopStmt).Condition);
+            Result := True;
+            if TBuiltinFunction(Ref).Kind = bfContinue then
+              Include(Stmt.Attr, stmtContinue)
+            else
+              Include(Stmt.Attr, stmtBreak);
+          end;
           bfExit:
-            begin
-              CheckFinallyBlock(nil);
-              // 带参数的Exit
-              with TBinaryExpr(CallStmt.CallExpr) do
-                if (Right <> nil) and (TUnaryExpr(Right).Operand <> nil) then
-                  SetInit(FResultVar, True);
-              CheckReturnVars;
-              Result := True;
-              Include(Stmt.Attr, stmtExit);
-            end;
+          begin
+            CheckFinallyBlock(nil);
+            with TBinaryExpr(CallStmt.CallExpr) do
+              if (Right <> nil) and (TUnaryExpr(Right).Operand <> nil) then
+                SetInit(FResultVar, True);
+            CheckReturnVars;
+            Result := True;
+            Include(Stmt.Attr, stmtExit);
+          end;
         end;
-
       end;
     end;
   end;
 
   procedure CheckArgs(S: TCallStmt);
   var
-    i: Integer;
+    i: integer;
     List: TListExpr;
   begin
     List := TListExpr(TBinaryExpr(S.CallExpr).Right);
@@ -442,7 +384,7 @@ end;
 
 procedure TCheckData.CheckCaseStmt(Stmt: TCaseStmt);
 var
-  i, j: Integer;
+  i, j: integer;
   LSaved1, LSaved2: TVarStates;
 begin
   CheckVarRef(Stmt.Expr);
@@ -453,7 +395,6 @@ begin
     CheckStmt(Stmt.Default);
     PopStates;
   end;
-
   for i := 0 to Stmt.Count - 1 do
   begin
     PushStates;
@@ -466,7 +407,6 @@ begin
         LSaved1[j] := LSaved1[j] and LSaved2[j];
     end;
   end;
-
   if Assigned(LSaved1) then
   begin
     LSaved2 := Self.LastStates;
@@ -480,7 +420,7 @@ procedure TCheckData.CheckCompoundStmt(Stmt: TCompoundStmt);
   procedure GoUpward;
   var
     UpStmt: TStatement;
-    OldIndex, Index: Integer;
+    OldIndex, Index: integer;
   begin
     UpStmt := GetUpward(Stmt, Index);
     if UpStmt <> nil then
@@ -494,48 +434,42 @@ procedure TCheckData.CheckCompoundStmt(Stmt: TCompoundStmt);
     end;
   end;
 
-  procedure SetUnreachable(Stmt: TCompoundStmt; Offset: Integer);
+  procedure SetUnreachable(Stmt: TCompoundStmt; Offset: integer);
   var
-    i: Integer;
+    i: integer;
     LCurStmt: TStatement;
   begin
     for i := Offset to Stmt.Statements.Count - 1 do
     begin
       LCurStmt := TStatement(Stmt.Statements[i]);
-      if LCurStmt.StmtKind = skLabelStmt then Break;
+      if LCurStmt.StmtKind = skLabelStmt then
+        Break;
       Include(LCurStmt.Attr, stmtUnreachable);
     end;
   end;
+
 var
-  i: Integer;
+  i: integer;
   LCurStmt: TStatement;
 begin
-  for i := FStartIndex to Stmt.Statements.Count - 1 do
+  for
+    i := FStartIndex to Stmt.Statements.Count - 1 do
   begin
     LCurStmt := TStatement(Stmt.Statements[i]);
     CheckStmt(LCurStmt);
-    // 标记不可到达的代码
     if stmtNoreturn in LCurStmt.Attr then
     begin
       Include(Stmt.Attr, stmtNoreturn);
       SetUnreachable(Stmt, i + 1);
       Break;
     end;
-
-    // Continue、Break、goto、Raise、Exit之后的同级代码到下一标签或结束，都是不可访问代码。
-    // Continue、Break、Exit跳转之前要执行finally块
     case LCurStmt.StmtKind of
-      skGotoStmt, skRaiseStmt:
-        SetUnreachable(Stmt, i + 1);
-      skCallStmt:
-        if (stmtBreak in LCurStmt.Attr)
-            or (stmtContinue in LCurStmt.Attr)
-            or (stmtExit in LCurStmt.Attr) then
+      skGotoStmt, skRaiseStmt: SetUnreachable(Stmt, i + 1);
+      skCallStmt: if (stmtBreak in LCurStmt.Attr) or (stmtContinue in LCurStmt.Attr) or
+          (stmtExit in LCurStmt.Attr) then
         begin
           SetUnreachable(Stmt, i + 1);
         end;
-//        if CheckContinueBreakExit(TCallStmt(LCurStmt)) then
-//          SetUnreachable(Stmt, i + 1);
     end;
   end;
   if FUpward then
@@ -578,11 +512,7 @@ procedure TCheckData.CheckGotoStmt(Stmt: TGotoStmt);
 
 begin
   Assert(Stmt.StmtLabel <> nil, 'CheckGotoStmt');
-
-  // 检查是否已经走过这个goto
   Self.AddPath(Stmt, Self.LastStates);
-  // 不能从外进入try，但在try之内可以跳转
-  // 不能跳转至finally, except
   if Stmt.StmtLabel.Stmt <> nil then
   begin
     if GetOuterStmt(Stmt.StmtLabel.Stmt) <> GetOuterStmt(Stmt) then
@@ -590,33 +520,28 @@ begin
   end
   else
     AddErrGoto(Stmt);
-
 end;
 
 procedure TCheckData.CheckIfStmt(Stmt: TIfStmt);
 var
   LSaved1, LSaved2, LCur: TVarStates;
-  i: Integer;
+  i: integer;
 begin
   CheckVarRef(Stmt.Value);
   PushStates;
   LSaved1 := LastStates;
   CheckStmt(Stmt.TrueStmt);
   PopStates;
-
   if Stmt.FalseStmt <> nil then
   begin
     PushStates;
     LSaved2 := LastStates;
     CheckStmt(Stmt.FalseStmt);
     PopStates;
-
     LCur := LastStates;
     for i := 0 to High(LSaved2) do
       LCur[i] := LSaved1[i] and LSaved2[i];
-
-    if (stmtNoreturn in Stmt.FalseStmt.Attr)
-        and (stmtNoreturn in Stmt.TrueStmt.Attr) then
+    if (stmtNoreturn in Stmt.FalseStmt.Attr) and (stmtNoreturn in Stmt.TrueStmt.Attr) then
       Include(Stmt.Attr, stmtNoreturn);
   end;
 end;
@@ -635,23 +560,20 @@ end;
 
 procedure TCheckData.CheckMain;
 var
-  i: Integer;
+  i: integer;
   Path: TPathInfo;
   sym: TSymbol;
 begin
-  PushStates;  // Must
+  PushStates;
   CheckStmt(FFunc.StartStmt);
   CheckReturnVars;
   PopStates;
-
   if stmtNoreturn in FFunc.StartStmt.Attr then
     Include(FFunc.Modifiers, fmNoReturn);
-
   i := 0;
   while i < FPaths.Count do
   begin
     Path := TPathInfo(FPaths[i]);
-    // 只有在变量没被赋值的情况下，才有检查的必要
     if StateInclude(Path.States, TVarStates(Path.LabStmt.Data)) in [irSubset, irEquals] then
     begin
       PushStates;
@@ -663,20 +585,17 @@ begin
     end;
     Inc(i);
   end;
-
-  // 检查使用前未初始化的变量
   if Self.FNoinitVars <> nil then
   begin
-    for i := 0 to Self.FNoinitVars.Count-1 do
+    for i := 0 to Self.FNoinitVars.Count - 1 do
     begin
       Sym := TSymbol(FNoinitVars[i]);
       FParser.DoWarning(Sym.Coord, '%s might not have been initialized', [Sym.Name]);
     end;
   end;
-
   if Self.FErrGotos <> nil then
   begin
-    for i := 0 to Self.FNoinitVars.Count-1 do
+    for i := 0 to Self.FNoinitVars.Count - 1 do
     begin
       with TGotoStmt(FNoinitVars[i]) do
         if StmtLabel.Stmt = nil then
@@ -685,9 +604,7 @@ begin
           FParser.ParseError(Coord, 'GOTO leads into or out of TRY statement');
     end;
   end;
-
-  if (Self.FNoassignVars <> nil)
-    and not (stmtNoreturn in FFunc.StartStmt.Attr) then
+  if (Self.FNoassignVars <> nil) and not (stmtNoreturn in FFunc.StartStmt.Attr) then
   begin
     for i := 0 to Self.FNoassignVars.Count - 1 do
     begin
@@ -710,7 +627,7 @@ end;
 
 procedure TCheckData.CheckReturnVars;
 var
-  i: Integer;
+  i: integer;
 begin
   for i := 0 to FReturnVarCount - 1 do
   begin
@@ -721,28 +638,24 @@ end;
 
 procedure TCheckData.CheckStmt(Stmt: TStatement);
 begin
-{  if Stmt.Data = nil then
-    Stmt.Data := Pointer(Data.LastStates)
-  else
-    if not IsNeed then Exit;}
-  if Stmt = nil then Exit;
+  if Stmt = nil then
+    Exit;
   PushStmt(Stmt);
-
   case Stmt.StmtKind of
     skGotoStmt: CheckGotoStmt(TGotoStmt(Stmt));
     skCompoundStmt: CheckCompoundStmt(TCompoundStmt(Stmt));
-    skIfStmt: CheckIfStmt(TIfStmt(Stmt));
+    skIfStmt:
+      CheckIfStmt(TIfStmt(Stmt));
     skCaseStmt: CheckCaseStmt(TCaseStmt(Stmt));
-    skWhileStmt: CheckWhileStmt(TWhileStmt(Stmt));
+    skWhileStmt:
+      CheckWhileStmt(TWhileStmt(Stmt));
     skRepeatStmt: CheckRepeatStmt(TRepeatStmt(Stmt));
     skForStmt: CheckForStmt(TForStmt(Stmt));
     skAssignmentStmt: CheckAssignStmt(TAssignmentStmt(Stmt));
     skTryStmt: CheckTryStmt(TTryStmt(Stmt));
     skLabelStmt: CheckLabelStmt(TLabeledStmt(Stmt));
     skCallStmt: CheckCallStmt(TCallStmt(Stmt));
-    //skRaise: CheckRaiseStmt(TRaiseStmt(Stmt));
   end;
-
   PopStmt;
 end;
 
@@ -750,7 +663,7 @@ procedure TCheckData.CheckTryStmt(Stmt: TTryStmt);
 
   procedure CheckExceptBlock(ExceptBlock: TExceptBlock);
   var
-    i: Integer;
+    i: integer;
     Handler: TExceptHandler;
   begin
     for i := 0 to ExceptBlock.Count - 1 do
@@ -767,6 +680,7 @@ procedure TCheckData.CheckTryStmt(Stmt: TTryStmt);
       PopStates;
     end;
   end;
+
 var
   LSaved1: TVarStates;
 begin
@@ -774,8 +688,6 @@ begin
   begin
     Self.FFinallyBlocks.Add(Stmt);
   end;
-
-  // 检查主体
   if Stmt.Stmt <> nil then
   begin
     PushStates;
@@ -783,15 +695,12 @@ begin
     CheckStmt(Stmt.Stmt);
     PopStates;
   end;
-
-  // 弹出并检查finally块
   if Stmt.FinallyStmt <> nil then
   begin
     Self.FFinallyBlocks.Delete(FFinallyBlocks.Count - 1);
     CheckStmt(Stmt.FinallyStmt);
     StateUnion(Self.LastStates, LSaved1);
   end;
-
   if Stmt.ExceptBlock <> nil then
     CheckExceptBlock(Stmt.ExceptBlock);
 end;
@@ -807,15 +716,15 @@ procedure TCheckData.CheckVarRef(E: TExpr);
 
   procedure CheckOutArg(E: TSymbolExpr);
   var
-    I: Integer;
+    I: integer;
     List: TListExpr;
     CallExpr: TBinaryExpr;
     F: TFunctionDecl;
     typ: TType;
   begin
     List := TListExpr(E.Parent);
-    if (List.Parent = nil) or (List.Parent.OpCode <> opCALL) then Exit;
-
+    if (List.Parent = nil) or (List.Parent.OpCode <> opCALL) then
+      Exit;
     CallExpr := TBinaryExpr(List.Parent);
     typ := CallExpr.Left.Typ;
     if typ.TypeCode = typProcedural then
@@ -839,39 +748,41 @@ procedure TCheckData.CheckVarRef(E: TExpr);
           Self.SetInit(E.Reference, True);
       end;
     end;
-
   end;
 
   procedure CheckList(E: TListExpr);
   var
-    I: Integer;
+    I: integer;
   begin
     for I := 0 to E.Count - 1 do
     begin
       CheckVarRef(E.Items[I]);
     end;
   end;
+
 begin
   case OpKinds[E.OpCode] of
-    opkUnary: begin
-        CheckVarRef(TUnaryExpr(E).Operand);
-      end;
-    opkBinary: begin
-        CheckVarRef(TBinaryExpr(E).Left);
-        CheckVarRef(TBinaryExpr(E).Right);
-      end;
-    opkList: begin
-        CheckList(TListExpr(E));
-      end;
-  else
-    if E.OpCode = opSYMBOL then
+    opkUnary:
     begin
-      if Assigned(E.Parent) and (E.Parent.OpCode = opLIST) then
-        CheckOutArg(TSymbolExpr(E));
-      // todo 1: 需要检查这里是否是作为out参数。如果是out，等同于对变量进行初始化。
-      if Assigned(E.Parent) and (E.Parent.OpCode <> opADDR) then
-        CheckVar(TSymbolExpr(E).Reference);
+      CheckVarRef(TUnaryExpr(E).Operand);
     end;
+    opkBinary:
+    begin
+      CheckVarRef(TBinaryExpr(E).Left);
+      CheckVarRef(TBinaryExpr(E).Right);
+    end;
+    opkList:
+    begin
+      CheckList(TListExpr(E));
+    end;
+    else
+      if E.OpCode = opSYMBOL then
+      begin
+        if Assigned(E.Parent) and (E.Parent.OpCode = opLIST) then
+          CheckOutArg(TSymbolExpr(E));
+        if Assigned(E.Parent) and (E.Parent.OpCode <> opADDR) then
+          CheckVar(TSymbolExpr(E).Reference);
+      end;
   end;
 end;
 
@@ -884,27 +795,24 @@ begin
   begin
     OldStmt := FCurLoopStmt;
     FCurLoopStmt := Stmt;
-
     PushStates;
     CheckStmt(Stmt.Stmt);
     PopStates;
-
     FCurLoopStmt := OldStmt;
   end;
 end;
 
 constructor TCheckData.Create;
 begin
-  FStmtStack := TList.Create;
-  FStmtStack.Capacity := 32;
-  FPaths := TList.Create;
-  FFinallyBlocks := TList.Create;
-//  FNoinitVars := TList.Create;
+  FStmtStack := TFPList.Create;
+  FStmtStack.Capacity := 64;
+  FPaths := TFPList.Create;
+  FFinallyBlocks := TFPList.Create;
 end;
 
 destructor TCheckData.Destroy;
 var
-  i: Integer;
+  i: integer;
 begin
   for i := 0 to FPaths.Count - 1 do
     TObject(FPaths[i]).Free;
@@ -917,9 +825,9 @@ begin
   inherited;
 end;
 
-function TCheckData.ExistsInStack(Stmt: TStatement): Boolean;
+function TCheckData.ExistsInStack(Stmt: TStatement): boolean;
 var
-  i: Integer;
+  i: integer;
 begin
   for i := FStmtStack.Count - 2 downto 0 do
     if FStmtStack[i] = Stmt then
@@ -930,23 +838,21 @@ begin
   Result := False;
 end;
 
-function TCheckData.IsInit(Sym: TSymbol): Boolean;
+function TCheckData.IsInit(Sym: TSymbol): boolean;
 begin
   Result := True;
-  if Sym.Parent <> FFunc then Exit;
-
+  if Sym.Parent <> FFunc then
+    Exit;
   Assert(FStateCount > 0, 'IsInit');
   case sym.NodeKind of
-    nkVariable:
-      if (TVariable(sym).Index = $ffff) then
+    nkVariable: if (TVariable(sym).Index = $ffff) then
         Result := True
       else
-        Result := FStates[FStateCount-1][TVariable(sym).Index];
-    nkFuncParam:
-      if (TFuncParam(sym).Index = $ffff) then
+        Result := FStates[FStateCount - 1][TVariable(sym).Index];
+    nkFuncParam: if (TFuncParam(sym).Index = $ffff) then
         Result := True
       else
-        Result := FStates[FStateCount-1][TFuncParam(sym).Index];
+        Result := FStates[FStateCount - 1][TFuncParam(sym).Index];
   end;
 end;
 
@@ -961,20 +867,21 @@ end;
 function TCheckData.LastStates: TVarStates;
 begin
   Assert(FStateCount > 0, 'LastStates');
-  Result := FStates[FStateCount - 1];
+  Result :=
+    FStates[FStateCount - 1];
 end;
 
 procedure TCheckData.PopStates;
 begin
   Assert(FStateCount > 0, 'PopState');
-  FStates[FStateCount-1] := nil;
+  FStates[FStateCount - 1] := nil;
   Dec(FStateCount);
 end;
 
 procedure TCheckData.PopStmt;
 begin
   Assert(FStmtStack.Count > 0, 'PopStmt');
-  FStmtStack.Delete(FStmtStack.Count-1);
+  FStmtStack.Delete(FStmtStack.Count - 1);
   if FStmtStack.Count = 0 then
     FStmt := nil
   else
@@ -983,14 +890,14 @@ end;
 
 procedure TCheckData.Prepare;
 
-  function NeedCheckInit(V: TVariable): Boolean;
+  function NeedCheckInit(V: TVariable): boolean;
   begin
-    Result := (not (vaSelf in V.VarAttr))
-            and not (V.VarType.TypeCode in AutoInitTypes)
-            and not (V.VarType.TypeCode in [typRecord, typObject, typArray]);
+    Result := (not (vaSelf in V.VarAttr)) and not (V.VarType.TypeCode in AutoInitTypes) and
+      not (V.VarType.TypeCode in [typRecord, typObject, typArray]);
   end;
+
 var
-  i, j: Integer;
+  i, j: integer;
   Sym: TSymbol;
 begin
   j := 0;
@@ -998,8 +905,7 @@ begin
   begin
     Sym := FFunc.LocalSymbols[i];
     case Sym.NodeKind of
-      nkFuncParam:
-        if argOut = TFuncParam(Sym).Modifier then
+      nkFuncParam: if argOut = TFuncParam(Sym).Modifier then
         begin
           AddVar(Sym);
           AddReturnVar(Sym);
@@ -1008,16 +914,13 @@ begin
         end
         else
           TFuncParam(Sym).Index := $ffff;
-
-      nkVariable:
-        if NeedCheckInit(TVariable(Sym)) then
+      nkVariable: if NeedCheckInit(TVariable(Sym)) then
         begin
           AddVar(Sym);
           TVariable(Sym).Index := j;
           Inc(j);
-          if (vaResult in TVariable(Sym).VarAttr)
-            and not ((FFunc.NodeKind = nkMethod)
-                and (TMethod(FFunc).MethodKind = mkConstructor)) then
+          if (vaResult in TVariable(Sym).VarAttr) and not ((FFunc.NodeKind = nkMethod) and
+            (TMethod(FFunc).MethodKind = mkConstructor)) then
           begin
             FResultVar := Sym;
             AddReturnVar(Sym);
@@ -1031,20 +934,14 @@ end;
 
 procedure TCheckData.PushStates;
 begin
-  // Copy States
   if FStateCount = Length(FStates) then
     SetLength(FStates, FStateCount + 10);
   SetLength(FStates[FStateCount], FVarCount);
   if FStateCount = 0 then
-    FillChar(FStates[0][0], FVarCount, 0)
+    SetLength(FStates[0], FVarCount)
   else
-    Move(FStates[FStateCount-1][0], FStates[FStateCount][0], FVarCount * SizeOf(Boolean));
-{
-  if FSavedStateCount = Length(FSavedStates) then
-    SetLength(FSavedStates, FSavedStateCount + 10);
-  FSavedStates[FSavedStateCount] := FStates[FStateCount];}
+    Move(FStates[FStateCount - 1][0], FStates[FStateCount][0], FVarCount * SizeOf(boolean));
   Inc(FStateCount);
-//  Inc(FSavedStateCount);
 end;
 
 procedure TCheckData.PushStmt(AStmt: TStatement);
@@ -1053,40 +950,21 @@ begin
   FStmtStack.Add(AStmt);
 end;
 
-procedure TCheckData.SetInit(Sym: TSymbol; Value: Boolean);
+procedure TCheckData.SetInit(Sym: TSymbol; Value: boolean);
 begin
   Assert(FStateCount > 0, 'SetInit');
   case sym.NodeKind of
-    nkVariable:
-      if (TVariable(sym).Index < $ffff) and (sym.Parent = FFunc) then
-        FStates[FStateCount-1][TVariable(sym).Index] := Value;
-    nkFuncParam:
-      if (TFuncParam(sym).Index < $ffff) and (sym.Parent = FFunc) then
-        FStates[FStateCount-1][TFuncParam(sym).Index] := Value;
+    nkVariable: if (TVariable(sym).Index < $ffff) and (sym.Parent = FFunc) then
+        FStates[FStateCount - 1][TVariable(sym).Index] := Value;
+    nkFuncParam: if (TFuncParam(sym).Index < $ffff) and (sym.Parent = FFunc) then
+        FStates[FStateCount - 1][TFuncParam(sym).Index] := Value;
   end;
 end;
-
-{
-Example:
-
-function test: Boolean;
-begin
-L1:
-  for i := 0 to MaxCount - 1 do
-  begin
-    if i % 2 = 0 then goto L1;
-    if i%3=0 then goto L2;
-  end;
-L2:
-end;
-
-}
 
 procedure CheckFunction(Parser: TParser; Func: TFunction);
 var
   Data: TCheckData;
 begin
-  // 检查变量使用与赋值
   Data := TCheckData.Create;
   try
     Data.FParser := Parser;

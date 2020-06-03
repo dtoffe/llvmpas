@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <CONFIG>
   <ProjectOptions>
-    <Version Value="9"/>
+    <Version Value="11"/>
     <PathDelim Value="\"/>
     <General>
       <Flags>
@@ -9,126 +9,177 @@
       </Flags>
       <SessionStorage Value="InProjectDir"/>
       <MainUnit Value="0"/>
+      <Title Value="lpc"/>
       <UseAppBundle Value="False"/>
       <ResourceType Value="res"/>
     </General>
     <i18n>
       <EnableI18N LFM="False"/>
     </i18n>
-    <VersionInfo>
-      <StringTable ProductVersion=""/>
-    </VersionInfo>
-    <BuildModes Count="1">
-      <Item1 Name="Default" Default="True"/>
+    <BuildModes Count="2">
+      <Item1 Name="Debug" Default="True"/>
+      <Item2 Name="AkirasWin64Release">
+        <CompilerOptions>
+          <Version Value="11"/>
+          <Target>
+            <Filename Value="../release/bin/lpc"/>
+          </Target>
+          <SearchPaths>
+            <IncludeFiles Value="$(ProjOutDir)"/>
+            <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)"/>
+          </SearchPaths>
+          <Parsing>
+            <Style Value="1"/>
+            <SyntaxOptions>
+              <SyntaxMode Value="Delphi"/>
+            </SyntaxOptions>
+          </Parsing>
+          <CodeGeneration>
+            <SmartLinkUnit Value="True"/>
+            <TargetCPU Value="x86_64"/>
+            <TargetOS Value="win64"/>
+            <Optimizations>
+              <OptimizationLevel Value="4"/>
+            </Optimizations>
+          </CodeGeneration>
+          <Linking>
+            <Debugging>
+              <GenerateDebugInfo Value="False"/>
+              <UseLineInfoUnit Value="False"/>
+              <StripSymbols Value="True"/>
+            </Debugging>
+            <LinkSmart Value="True"/>
+          </Linking>
+          <Other>
+            <CompilerMessages>
+              <IgnoredMessages idx5028="True" idx5024="True"/>
+            </CompilerMessages>
+            <CustomOptions Value="-CfAVX2 -Ci- -Co- -CO- -CpCOREAVX2 -Cr- -CR- -g- -OoLOOPUNROLL -OoSTRENGTH -OoUNCERTAIN -OpCOREAVX2 -Sa -Sv"/>
+          </Other>
+        </CompilerOptions>
+      </Item2>
     </BuildModes>
     <PublishOptions>
       <Version Value="2"/>
-      <IncludeFileFilter Value="*.(pas|pp|inc|lfm|lpr|lrs|lpi|lpk|sh|xml)"/>
-      <ExcludeFileFilter Value="*.(bak|ppu|o|so);*~;backup"/>
     </PublishOptions>
     <RunParams>
       <local>
-        <FormatVersion Value="1"/>
-        <CommandLineParams Value="..\test\methptr007.pas"/>
+        <CommandLineParams Value="-O2 -emit-llvm D:\BenDownloads\release\bin\for001.pas"/>
       </local>
+      <FormatVersion Value="2"/>
+      <Modes Count="1">
+        <Mode0 Name="default">
+          <local>
+            <CommandLineParams Value="-O2 -emit-llvm D:\BenDownloads\release\bin\for001.pas"/>
+          </local>
+        </Mode0>
+      </Modes>
     </RunParams>
     <Units Count="15">
       <Unit0>
         <Filename Value="lpc.lpr"/>
         <IsPartOfProject Value="True"/>
-        <UnitName Value="lpc"/>
       </Unit0>
       <Unit1>
         <Filename Value="ast.pas"/>
         <IsPartOfProject Value="True"/>
-        <UnitName Value="ast"/>
       </Unit1>
       <Unit2>
         <Filename Value="ptrhashtable.pas"/>
         <IsPartOfProject Value="True"/>
-        <UnitName Value="ptrhashtable"/>
       </Unit2>
       <Unit3>
         <Filename Value="cntx.pas"/>
         <IsPartOfProject Value="True"/>
-        <UnitName Value="cntx"/>
       </Unit3>
       <Unit4>
         <Filename Value="cupersist.pas"/>
         <IsPartOfProject Value="True"/>
-        <UnitName Value="cupersist"/>
       </Unit4>
       <Unit5>
         <Filename Value="err.pas"/>
         <IsPartOfProject Value="True"/>
-        <UnitName Value="err"/>
       </Unit5>
       <Unit6>
         <Filename Value="lex.pas"/>
         <IsPartOfProject Value="True"/>
-        <UnitName Value="lex"/>
       </Unit6>
       <Unit7>
         <Filename Value="parser.pas"/>
         <IsPartOfProject Value="True"/>
-        <UnitName Value="parser"/>
       </Unit7>
       <Unit8>
         <Filename Value="start.pas"/>
         <IsPartOfProject Value="True"/>
-        <UnitName Value="start"/>
       </Unit8>
       <Unit9>
         <Filename Value="fileutils.pas"/>
         <IsPartOfProject Value="True"/>
-        <UnitName Value="fileutils"/>
       </Unit9>
       <Unit10>
         <Filename Value="hashtable.pas"/>
         <IsPartOfProject Value="True"/>
-        <UnitName Value="hashtable"/>
       </Unit10>
       <Unit11>
         <Filename Value="func.pas"/>
         <IsPartOfProject Value="True"/>
-        <UnitName Value="func"/>
       </Unit11>
       <Unit12>
         <Filename Value="dump.pas"/>
         <IsPartOfProject Value="True"/>
-        <UnitName Value="dump"/>
       </Unit12>
       <Unit13>
         <Filename Value="llvm_codegen.pas"/>
         <IsPartOfProject Value="True"/>
-        <UnitName Value="llvm_codegen"/>
       </Unit13>
       <Unit14>
         <Filename Value="llvm_codepack.pas"/>
         <IsPartOfProject Value="True"/>
-        <UnitName Value="llvm_codepack"/>
       </Unit14>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
     <Version Value="11"/>
     <Target>
-      <Filename Value="../release/bin/lpc"/>
+      <Filename Value="../release/bin/lpcdebug"/>
     </Target>
     <SearchPaths>
       <IncludeFiles Value="$(ProjOutDir)"/>
-      <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)"/>
+      <UnitOutputDirectory Value="libdebug/$(TargetCPU)-$(TargetOS)"/>
     </SearchPaths>
+    <Parsing>
+      <Style Value="1"/>
+      <SyntaxOptions>
+        <SyntaxMode Value="Delphi"/>
+        <IncludeAssertionCode Value="True"/>
+      </SyntaxOptions>
+    </Parsing>
+    <CodeGeneration>
+      <Checks>
+        <IOChecks Value="True"/>
+        <RangeChecks Value="True"/>
+        <OverflowChecks Value="True"/>
+        <StackChecks Value="True"/>
+      </Checks>
+      <Optimizations>
+        <OptimizationLevel Value="0"/>
+      </Optimizations>
+    </CodeGeneration>
+    <Linking>
+      <Debugging>
+        <DebugInfoType Value="dsDwarf2"/>
+        <UseHeaptrc Value="True"/>
+      </Debugging>
+    </Linking>
     <Other>
       <CompilerMessages>
-        <IgnoredMessages idx5024="True" idx5028="True"/>
-        <MsgFileName Value=""/>
+        <IgnoredMessages idx5028="True" idx5024="True"/>
       </CompilerMessages>
-      <CompilerPath Value="$(CompPath)"/>
+      <CustomOptions Value="-b -bl -CR- -godwarfsets -godwarfmethodclassprefix -Sa -dDEBUG"/>
     </Other>
   </CompilerOptions>
   <Debugging>
-    <Exceptions Count="3">
+    <Exceptions Count="5">
       <Item1>
         <Name Value="EAbort"/>
       </Item1>
@@ -138,6 +189,12 @@
       <Item3>
         <Name Value="EFOpenError"/>
       </Item3>
+      <Item4>
+        <Name Value="RunError(201)"/>
+      </Item4>
+      <Item5>
+        <Name Value="ERangeError"/>
+      </Item5>
     </Exceptions>
   </Debugging>
 </CONFIG>

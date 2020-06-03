@@ -96,24 +96,12 @@ implementation
 procedure TCustomPtrHashTable.Clear;
 var
 	I: Integer;
-{	P, N: PPtrHashItem;}
 begin
-{	for I := 0 to Length(Buckets) - 1 do
-	begin
-		P := Buckets[I];
-		while P <> nil do
-		begin
-			N := P^.Next;
-			Dispose(P);
-			P := N;
-		end;
-		Buckets[I] := nil;
-	end;}
   for I := 0 to FCount - 1 do
     Dispose(FItems[I]);
   FCount := 0;
-  FillChar(FItems[0], Length(FItems) * SizeOf(Pointer), 0);
-  FillChar(Buckets[0], Length(Buckets) * SizeOf(Pointer), 0);
+  SetLength(FItems, 0);
+  SetLength(Buckets, 0);
 end;
 
 constructor TCustomPtrHashTable.Create(Size: Integer);
@@ -188,20 +176,8 @@ begin
   Result := FItems[Index]^.Key;
 end;
 
-{function TCustomPtrHashTable.HashOf(Key: Pointer): Cardinal;
-var
-	I: Integer;
-  p: PByte;
-begin
-  p := @Key;
-	Result := 0;
-  for I := 0 to SizeOf(Pointer) - 1 do
-  begin
-    Result := Cardinal(Integer(Result shl 5) - Integer(Result)) xor LongWord(p^);
-    Inc(p);
-  end;
-end; }
-
+{$push}
+{$warn 4055 off}
 function TCustomPtrHashTable.HashOf(Key: Pointer): Cardinal;
 begin
 {$IFDEF FPC}
@@ -214,6 +190,7 @@ begin
   Result := Result + (Result shl 4);
   Result := Result xor (Result shr 10);
 end;
+{$pop}
 
 function TCustomPtrHashTable.IsExists(Key: Pointer): Boolean;
 begin
@@ -392,6 +369,7 @@ var
   HashMean,
   HashStdDev : Double;
 begin
+  Result := '';
   for I := Low(Item) to High(Item) do
     Item[I] := 0;
   Conflict := 0;

@@ -1,8 +1,10 @@
 unit err;
+
 {$ifdef FPC}
-{$mode delphi}{$H+}
+{$mode delphi}
+{$H+}{$J-}
 {$endif}
-// ¥ÌŒÛ–≈œ¢
+
 interface
 
 const
@@ -35,9 +37,6 @@ const
   SErr_InvalidOpenArrayEl = '(1055)Bad argument type in variable type array constructor';
   SErr_SymbolNotAccess = '(1057)Symbol %s can not be access';
   SErr_NumberOfElementsMismatch = '(1061)Number of elements differs from declaration';
-// type
-
-// expr
   SErr_InvalidOperand = '(1217)Operator not applicable to this operand type';
   SErr_InvalidCast = '(1218)Invalid type cast';
   SErr_InvalidConstOp = '(1219)Invalid operator in constant expression';
@@ -58,7 +57,6 @@ const
   SErr_InheritedExpectId = '(1239)Inherited keyword expect an identifier';
   SErr_InheritedNotAllow = '(1240)Inherited not allowed in here';
   SErr_OpNotAllow = '(1241)Operator not allowed in here';
-// const/var
   SErr_ExpectConstExpr = '(1301)Expect constant expression';
   SErr_InvalidConstExpr = '(1302)Invalid constant expression';
   SErr_ConstantOutOfRange = '(1303)Constant expression violates subrange bounds';
@@ -66,7 +64,6 @@ const
   SErr_AbsoluteVarList = '(1329)Absolute var can only be associated to one variable';
   SErr_MultiVariablesInit = '(1362)Cannot initialize multiple variables';
   SErr_ThreadVarInit = '(1363)Cannot initialize thread local variables';
-// class/interface/object
   SErr_ClassNotComplete = '(1401)Class %s not completely defined';
   SErr_BaseClassSealed = '(1402)Base class is sealed, can not be inherited';
   SErr_AccessorMethodArgsNotMatched = '(1403)Accessor method arguments not matched';
@@ -78,16 +75,14 @@ const
   SErr_IntfMethodNotImpl = '(1409)Interface method %s not implemented';
   SErr_NoVirtualMethod = '(1410)No virtual method %s in base class';
   SErr_OverridedDiffers = '(1411)Overrided method %s differs from base declaration';
-  SErr_DefaultPropDuplicated = '(1412)Only one default property can inside class,object,record,interface declaraction';
+  SErr_DefaultPropDuplicated = '(1412)Only one default property can inside class,object,record,interface declaration';
   SErr_ExpectProtectOrPrivate = '(1413)`protected` or `private` expected';
   SErr_ExpectMethodOrProperty = '(1414)`function`, `procedure` or `property` expected';
   SErr_ExpectProcOrFunc = '(1415)`function` or `procedure` expected';
   SErr_ExpectMethod = '(1416)Method expected';
   SErr_MessageMethodArg = '(1417)Message method can only take a var parameter';
   SErr_MessageMethodDirective = '(1418)Invalid message method directive';
-// statement
   SErr_CaseLabelDuplicated = '(1501)Case label duplicated';
-
   SWarn_CombiningSignedUnsigned = '(5001)Combining signed and unsigned types - widened both operands';
   SWarn_SymbolThroughInstance = '(5002)Symbol %s are not suitable to access through the instance';
 

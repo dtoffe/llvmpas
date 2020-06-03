@@ -1,16 +1,21 @@
 unit fileutils;
+
 {$ifdef FPC}
-{$mode delphi}{$H+}
+{$mode delphi}
+{$H+}{$J-}
 {$endif}
 
 interface
+
 uses SysUtils, ast;
 
 procedure GetFileTimeStamp(const S: string; out TimeStamp: TFileTimeStamp); overload;
 procedure GetFileTimeStamp(Handle: THandle; out TimeStamp: TFileTimeStamp); overload;
 
 implementation
+
 uses Windows;
+
 {$warnings off}
 {$hints off}
 
@@ -32,8 +37,7 @@ begin
   hFind := FindFirstFile(PChar(S), FindData);
   if hFind <> INVALID_HANDLE_VALUE then
   begin
-    if FileTimeToLocalFileTime(FindData.ftLastWriteTime, localT)
-      and FileTimeToSystemTime(localT, sysT) then
+    if FileTimeToLocalFileTime(FindData.ftLastWriteTime, localT) and FileTimeToSystemTime(localT, sysT) then
     begin
       ToTimeStamp(sysT, TimeStamp);
     end;
@@ -48,12 +52,11 @@ var
 begin
   TimeStamp.Date := 0;
   TimeStamp.Time := 0;
-  if GetFileTime(Handle, nil, nil, @lastWrite)
-    and FileTimeToLocalFileTime(lastWrite, localT)
-    and FileTimeToSystemTime(localT, sysT) then
+  if GetFileTime(Handle, nil, nil, @lastWrite) and FileTimeToLocalFileTime(lastWrite, localT) and
+    FileTimeToSystemTime(localT, sysT) then
   begin
     ToTimeStamp(sysT, TimeStamp);
-  end
+  end;
 end;
 
 end.

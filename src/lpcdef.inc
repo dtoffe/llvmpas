@@ -1,5 +1,5 @@
 {$ifdef FPC}
-{$mode delphi}{$H+}
+{$mode delphi}{$H+}{$J-}
 {$define HAS_EQUALS}
 {$define SUPPORT_INLINE}
 {$warn 5024 off  param not used}

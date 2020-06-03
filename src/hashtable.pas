@@ -165,8 +165,8 @@ begin
     Dispose(FItems[I]);
   end;
   FCount := 0;
-  FillChar(FItems[0], Length(FItems) * SizeOf(Pointer), 0);
-  FillChar(Buckets[0], Length(Buckets) * SizeOf(Pointer), 0);
+  SetLength(FItems, 0);
+  SetLength(Buckets, 0);
 end;
 
 constructor TBaseHashTable.Create(Size: Integer);
@@ -663,6 +663,8 @@ begin
   Result := FItems[Index]^.Key;
 end;
 
+{$push}
+{$warn 4055 off}
 function TPtrHashTable.HashOf(const Key: Pointer): Cardinal;
 begin
 {$IFDEF FPC}
@@ -675,6 +677,7 @@ begin
   Result := Result + (Result shl 4);
   Result := Result xor (Result shr 10);
 end;
+{$pop}
 
 function TPtrHashTable.IsExists(const Key: Pointer): Boolean;
 begin

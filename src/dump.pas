@@ -1,18 +1,17 @@
 unit dump;
-// µ¼³öAST
+
 {$ifdef FPC}
-{$mode delphi}{$H+}
+{$mode delphi}
+{$H+}{$J-}
 {$endif}
 
 interface
+
 uses Classes, SysUtils, ast;
 
 type
-  TDumpOption = (
-    doDumpLoc, doDumpType, doDumpVar, doDumpConst,
-    doDumpField, doDumpProp, doDumpFunc, doDumpFuncBody,
-    doDumpLabel, doDumpMR
-  );
+  TDumpOption = (doDumpLoc, doDumpType, doDumpVar, doDumpConst, doDumpField, doDumpProp,
+    doDumpFunc, doDumpFuncBody, doDumpLabel, doDumpMR);
   TDumpOptions = set of TDumpOption;
 
   TSimpleWriter = class
@@ -21,17 +20,15 @@ type
     function EndObject: TSimpleWriter; virtual; abstract;
     function BeginArray: TSimpleWriter; virtual; abstract;
     function EndArray: TSimpleWriter; virtual; abstract;
-    function Key(const name: string): TSimpleWriter; virtual; abstract;
-    function Value(const value: string): TSimpleWriter; overload; virtual; abstract;
-    function Value(const value: Double): TSimpleWriter; overload; virtual; abstract;
-    function Value(const value: Integer): TSimpleWriter; overload; virtual; abstract;
-    function Value(const value: Int64): TSimpleWriter; overload; virtual; abstract;
-    function Value(const value: Boolean): TSimpleWriter; overload; virtual; abstract;
+    function Key(const Name: string): TSimpleWriter; virtual; abstract;
+    function Value(const Avalue: string): TSimpleWriter; overload; virtual; abstract;
+    function Value(const Avalue: double): TSimpleWriter; overload; virtual; abstract;
+    function Value(const Avalue: integer): TSimpleWriter; overload; virtual; abstract;
+    function Value(const Avalue: int64): TSimpleWriter; overload; virtual; abstract;
+    function Value(const Avalue: boolean): TSimpleWriter; overload; virtual; abstract;
     function NullValue: TSimpleWriter; overload; virtual; abstract;
     function GetContent: string; virtual; abstract;
   end;
-
-  { TDump }
 
   TDump = class
   private
@@ -39,7 +36,6 @@ type
   protected
     FWriter: TSimpleWriter;
     FOptions: TDumpOptions;
-
     function SymbolAttrStr(attr: TSymbolAttributes): string;
     function VarAttrStr(attr: TVarAttributes): string;
     function VarStateStr(stat: TVarStates): string;
@@ -50,7 +46,6 @@ type
     function CodeSwitchStr(s: TCodeSwitches): string;
     function IntfPropAttrStr(attr: TIntfPropertyAttributes): string;
     function PropAttrStr(attr: TPropertyAttributes): string;
-
     procedure DumpVal(const V: TValueRec);
     procedure DumpExpr(E: TExpr);
     procedure DumpSymBase(S: TSymbol);
@@ -69,8 +64,6 @@ type
     function Dump(M: TModule; Options: TDumpOptions): string;
   end;
 
-  { TJsonDump }
-
   TJsonDump = class(TDump)
   public
     constructor Create;
@@ -79,63 +72,33 @@ type
 
 const
   DumpAllOptions = [Low(TDumpOption)..High(TDumpOption)];
+
 implementation
 
 const
-  NodeKNames: array[TAstNodeKind] of string = (
-    // nkSymbol, nkExpr, nkType, nkNameScope, nkModule,
-    'symbol', 'expr', 'type', 'namepart', 'module',
-    // nkVariable, nkConstant, nkField, nkProperty, nkIntfProperty,
-    'var', 'const', 'field', 'prop', 'intfprop',
-    // nkMethod, nkMethodResolution, nkFuncParam, nkEnumElement,
-    'method', 'methreso', 'param', 'enumel', 'func',
-    // nkFunc, nkExternalFunc, nkBuiltinFunc, nkAccessor,
-    'externalfunc', 'builtinfunc', 'accessor',
-    // nkLabel, nkStmt, nkSymbolOffset
-    'label', 'stmt', 'symoffset'
-  );
-
-  CCNames: array[TCallingConvention] of string = (
-  //(ccDefault, ccRegister, ccPascal, ccCDecl, ccStdCall, ccSafeCall)
-    'default', 'register', 'pascal', 'cdecl', 'stdcall', 'safecall'
-  );
-
-  MethKNames: array[TMethodKind] of string = (
-    'normal', 'ctor', 'dtor', 'objctor', 'objdtor', 'recctor', 'recdtor'
-  );
-
-  ObjKNames: array[TObjectKind] of string = (
-    'class', 'object', 'record'
-  );
-
-  OpStr: array[TExprOpCode] of string = (
-    'none',
-//  opNE, opEQ, opLT, opLE, opGT, opGE, opIN, opIS, opAS,
-    '<>', '=', '<', '<=', '>', '>=', 'in', 'is', 'as',
-//  opADD, opSUB, opOR, opXOR, opMUL, opDIV, opIDIV,
-    '+', '-', 'or', 'xor', '*', '/', 'div',
-//  opMOD, opAND, opSHL, opSHR,
-    'mod', 'and', 'shl', 'shr',
-//  opMEMBER, opCAST, opCALL, opRANGE, opINDEX, opASSIGN, opFMT,
-    'memberof', 'cast', 'call', 'range', 'index', ':=',   ':',
-//  opNOT, opNEG, opPOS,
-    'not', 'neg', 'pos',
-// opINHERITED, opSET, opLIST, opADDR, opDBLADDR, opINST, opDISPCALL, opNIL,
-    'inherited', 'set', 'list', '@',   '@@',      '^',    '.', 'nil',
-// opCONST, opSYMBOL
-    'const', 'sym'
-  );
+  NodeKNames: array[TAstNodeKind] of string =
+    ('symbol', 'expr', 'type', 'namepart', 'module', 'var', 'const', 'field', 'prop', 'intfprop',
+    'method', 'methreso', 'param', 'enumel', 'func', 'externalfunc', 'builtinfunc', 'accessor',
+    'label', 'stmt', 'symoffset');
+  CCNames: array
+    [TCallingConvention] of string = ('default', 'register', 'pascal', 'cdecl', 'stdcall', 'safecall');
+  MethKNames: array[TMethodKind] of string = ('normal', 'ctor', 'dtor', 'objctor', 'objdtor', 'recctor', 'recdtor');
+  ObjKNames: array[TObjectKind] of string = ('class', 'object', 'record');
+  OpStr: array[TExprOpCode] of string = ('none', '<>', '=', '<', '<=', '>', '>=', 'in', 'is',
+    'as', '+', '-', 'or', 'xor', '*', '/', 'div', 'mod', 'and', 'shl', 'shr', 'memberof',
+    'cast', 'call', 'range', 'index', ':=', ':', 'not', 'neg', 'pos', 'inherited', 'set', 'list',
+    '@', '@@', '^', '.', 'nil', 'const', 'sym');
 
 function JsStrEncode(const s: string): string;
 
-  procedure Replace(var s: string; i: Integer; const c1, c2: Char);
+  procedure Replace(var s: string; i: integer; const c1, c2: char);
   begin
     Insert(c1, s, i);
     Result[i + 1] := c2;
   end;
 
 var
-  i: Integer;
+  i: integer;
 begin
   Result := s;
   for i := Length(s) downto 1 do
@@ -146,30 +109,28 @@ begin
       #10: Replace(Result, i, '\', 'n');
       #12: Replace(Result, i, '\', 'f');
       #13: Replace(Result, i, '\', 'r');
-      '"':Replace(Result, i, '\', '"');
-      '\':Replace(Result, i, '\', '\');
-      '/':Replace(Result, i, '\', '/');
+      '"': Replace(Result, i, '\', '"');
+      '\': Replace(Result, i, '\', '\');
+      '/': Replace(Result, i, '\', '/');
     end;
   end;
-  Result := '"' + Result + '"';
+  Result :=
+    '"' + Result + '"';
 end;
 
 type
   EJWError = class(Exception);
-
   TJWState = (jwsNone, jwsObject, jwsArray, jwsKey);
   TJWStates = set of TJWState;
-
-  { TJsonWriter }
 
   TJsonWriter = class(TSimpleWriter)
   private
     FContent: string;
     FStates: array of TJWState;
-    FStateCount: Integer;
+    FStateCount: integer;
     procedure PushState(S: TJWState);
     procedure PopState;
-    function LastChar: Char;
+    function LastChar: char;
     procedure RemoveLastChar;
     procedure JWError(const msg: string);
     function GetCurState: TJWState;
@@ -179,17 +140,15 @@ type
     function EndObject: TSimpleWriter; override;
     function BeginArray: TSimpleWriter; override;
     function EndArray: TSimpleWriter; override;
-    function Key(const name: string): TSimpleWriter; override;
-    function Value(const value: string): TSimpleWriter; overload; override;
-    function Value(const value: Double): TSimpleWriter; overload; override;
-    function Value(const value: Integer): TSimpleWriter; overload; override;
-    function Value(const value: Int64): TSimpleWriter; overload; override;
-    function Value(const value: Boolean): TSimpleWriter; overload; override;
+    function Key(const Name: string): TSimpleWriter; override;
+    function Value(const Avalue: string): TSimpleWriter; overload; override;
+    function Value(const Avalue: double): TSimpleWriter; overload; override;
+    function Value(const Avalue: integer): TSimpleWriter; overload; override;
+    function Value(const Avalue: int64): TSimpleWriter; overload; override;
+    function Value(const Avalue: boolean): TSimpleWriter; overload; override;
     function NullValue: TSimpleWriter; overload; override;
     function GetContent: string; override;
   end;
-
-{ TJsonWriter }
 
 function TJsonWriter.BeginArray: TSimpleWriter;
 begin
@@ -217,7 +176,8 @@ begin
     RemoveLastChar;
   FContent := FContent + '],';
   PopState;
-  if CurState = jwsKey then PopState;
+  if CurState = jwsKey then
+    PopState;
   Result := Self;
 end;
 
@@ -229,7 +189,8 @@ begin
     RemoveLastChar;
   FContent := FContent + '},';
   PopState;
-  if CurState = jwsKey then PopState;
+  if CurState = jwsKey then
+    PopState;
   Result := Self;
 end;
 
@@ -247,7 +208,7 @@ begin
   if FStateCount = 0 then
     Result := jwsNone
   else
-    Result := FStates[FStateCount-1];
+    Result := FStates[FStateCount - 1];
 end;
 
 procedure TJsonWriter.JWError(const msg: string);
@@ -255,16 +216,16 @@ begin
   raise EJWError.Create(msg);
 end;
 
-function TJsonWriter.Key(const name: string): TSimpleWriter;
+function TJsonWriter.Key(const Name: string): TSimpleWriter;
 begin
   if CurState <> jwsObject then
     JWError('key not allow in here');
-  FContent := FContent + JsStrEncode(name) + ':';
+  FContent := FContent + JsStrEncode(Name) + ':';
   PushState(jwsKey);
   Result := Self;
 end;
 
-function TJsonWriter.LastChar: Char;
+function TJsonWriter.LastChar: char;
 begin
   if FContent = '' then
     Result := #0
@@ -302,11 +263,11 @@ begin
   Delete(fContent, Length(FContent), 1);
 end;
 
-function TJsonWriter.Value(const value: Boolean): TSimpleWriter;
+function TJsonWriter.Value(const Avalue: boolean): TSimpleWriter;
 begin
   if not (CurState in [jwsKey, jwsArray]) then
     JWError('TJsonWriter.Value: expect key');
-  if value then
+  if avalue then
     FContent := FContent + 'true,'
   else
     FContent := FContent + 'false,';
@@ -315,53 +276,49 @@ begin
   Result := Self;
 end;
 
-function TJsonWriter.Value(const value: Double): TSimpleWriter;
+function TJsonWriter.Value(const Avalue: double): TSimpleWriter;
 begin
   if not (CurState in [jwsKey, jwsArray]) then
     JWError('TJsonWriter.Value: expect key');
-  FContent := FContent + FloatToStr(value) + ',';
+  FContent := FContent + FloatToStr(avalue) + ',';
   if CurState <> jwsArray then
     PopState;
   Result := Self;
 end;
 
-function TJsonWriter.Value(const value: Int64): TSimpleWriter;
+function TJsonWriter.Value(const Avalue: int64): TSimpleWriter;
 begin
   if not (CurState in [jwsKey, jwsArray]) then
     JWError('TJsonWriter.Value: expect key');
-  FContent := FContent + IntToStr(value) + ',';
+  FContent := FContent + IntToStr(avalue) + ',';
   if CurState <> jwsArray then
     PopState;
   Result := Self;
 end;
 
-function TJsonWriter.Value(const value: Integer): TSimpleWriter;
+function TJsonWriter.Value(const Avalue: integer): TSimpleWriter;
 begin
   if not (CurState in [jwsKey, jwsArray]) then
     JWError('TJsonWriter.Value: expect key');
-  FContent := FContent + IntToStr(value) + ',';
+  FContent := FContent + IntToStr(avalue) + ',';
   if CurState <> jwsArray then
     PopState;
   Result := Self;
 end;
 
-function TJsonWriter.Value(const value: string): TSimpleWriter;
+function TJsonWriter.Value(const Avalue: string): TSimpleWriter;
 begin
   if not (CurState in [jwsKey, jwsArray]) then
     JWError('TJsonWriter.Value: expect key');
-  FContent := FContent + JsStrEncode(value) + ',';
+  FContent := FContent + JsStrEncode(avalue) + ',';
   if CurState <> jwsArray then
     PopState;
   Result := Self;
 end;
-
-{ TDump }
 
 function TDump.ClassAttrStr(attr: TClassAttributes): string;
 const
-  AttrStr: array[TClassAttribute] of string = (
-    'Sealed', 'Abstract', 'Rtti'
-  );
+  AttrStr: array[TClassAttribute] of string = ('Sealed', 'Abstract', 'Rtti');
 var
   i: TClassAttribute;
 begin
@@ -369,14 +326,14 @@ begin
   for i := Low(TClassAttribute) to High(TClassAttribute) do
     if i in attr then
       Result := Result + AttrStr[i] + ',';
-  if Result <> '' then Delete(Result, Length(Result), 1);
+  if Result <> '' then
+    Delete(Result, Length(Result), 1);
 end;
 
 function TDump.CodeSwitchStr(s: TCodeSwitches): string;
 const
-  CSStr: array[cdBoolEval..cdSafeDivide] of string = (
-    'BoolEval','IOChecks','OverflowChecks','RangeChecks','SafeDivide'
-  );
+  CSStr: array[cdBoolEval..cdSafeDivide] of string =
+    ('BoolEval', 'IOChecks', 'OverflowChecks', 'RangeChecks', 'SafeDivide');
 var
   i: TCompilerDirective;
 begin
@@ -384,22 +341,23 @@ begin
   for i := cdBoolEval to cdSafeDivide do
     if i in s then
       Result := Result + CSStr[i] + ',';
-  if Result <> '' then Delete(Result, Length(Result), 1);
+  if Result <> '' then
+    Delete(Result, Length(Result), 1);
 end;
 
 function TDump.Dump(M: TModule; Options: TDumpOptions): string;
 var
-  i: Integer;
+  i: integer;
   sym: TSymbol;
 begin
   FOptions := Options;
   FWriter.BeginArray;
-  for i := 0 to M.Symbols.Count-1 do
+  for i := 0 to M.Symbols.Count - 1 do
   begin
     sym := M.Symbols[i];
     DumpSym(sym);
   end;
-  for i := 0 to M.InternalSymbols.Count-1 do
+  for i := 0 to M.InternalSymbols.Count - 1 do
   begin
     sym := M.InternalSymbols[i];
     DumpSym(sym);
@@ -412,7 +370,6 @@ procedure TDump.DumpAccessor(Acssr: TMultiAccessor);
 begin
   FWriter.BeginObject;
   DumpSymBase(Acssr);
-  // todo 1: need
   FWriter.EndObject;
 end;
 
@@ -432,12 +389,14 @@ begin
 end;
 
 procedure TDump.DumpExpr(E: TExpr);
+
   procedure WriteList(E: TListExpr);
   var
-    i: Integer;
+    i: integer;
   begin
     FWriter.BeginArray;
-    for i := 0 to E.Count-1 do
+    for i :=
+      0 to E.Count - 1 do
       DumpExpr(E.Items[i]);
     FWriter.EndArray;
   end;
@@ -448,7 +407,6 @@ begin
     FWriter.NullValue;
     Exit;
   end;
-
   FWriter.BeginObject;
   if doDumpLoc in FOptions then
     FWriter.Key('loc').Value(Format('%d,%d', [E.Coord.Row, E.Coord.Col]));
@@ -461,32 +419,35 @@ begin
   else
     FWriter.Value(E.Typ.FullName);
   case ExprKinds[E.OpCode] of
-    1: begin
+    1:
+    begin
       FWriter.Key('operand');
       DumpExpr(TUnaryExpr(E).Operand);
     end;
-    2: begin
+    2:
+    begin
       FWriter.Key('left');
       DumpExpr(TBinaryExpr(E).Left);
       FWriter.Key('right');
       DumpExpr(TBinaryExpr(E).Right);
     end;
-    5: begin
+    5:
+    begin
       FWriter.Key('items');
       WriteList(TListExpr(E));
     end;
-  else
-    case E.OpCode of
-      opNIL, opCONST:
+    else
+      case E.OpCode of
+        opNIL, opCONST:
         begin
           FWriter.Key('value');
           DumpVal(TConstExpr(E).Value);
         end;
-      opSYMBOL:
+        opSYMBOL:
         begin
           FWriter.Key('ref').Value(TSymbolExpr(E).Reference.FullName);
         end;
-    end;
+      end;
   end;
   FWriter.EndObject;
 end;
@@ -499,19 +460,18 @@ begin
   if F.FieldType.Name = '' then
     DumpType(F.FieldType)
   else
-    FWriter.Value(F.FieldType.FullName);
+    FWriter.
+      Value(F.FieldType.FullName);
   FWriter.Key('offset').Value(F.Offset);
   FWriter.EndObject;
-
 end;
 
 procedure TDump.DumpFunc(F: TFunctionDecl);
 var
-  i: Integer;
+  i: integer;
 begin
   FWriter.BeginObject;
   DumpSymBase(F);
-
   FWriter.Key('level').Value(F.Level);
   FWriter.Key('cc').Value(CCNames[F.CallConvention]);
   FWriter.Key('return');
@@ -519,19 +479,17 @@ begin
     FWriter.Value('void')
   else
     FWriter.Value(F.ReturnType.FullName);
-
   FWriter.Key('args');
   FWriter.BeginArray;
   for i := 0 to F.ParamCount - 1 do
     Self.DumpParam(F.Params[i]);
   FWriter.EndArray;
-
   FWriter.EndObject;
 end;
 
 procedure TDump.DumpIntfProp(P: TIntfProperty);
 var
-  i: Integer;
+  i: integer;
 begin
   FWriter.BeginObject;
   DumpSymBase(P);
@@ -541,20 +499,16 @@ begin
     FWriter.Key('getter').NullValue
   else
     FWriter.Key('getter').Value(P.Getter.Name);
-
   if P.Setter = nil then
     FWriter.Key('setter').NullValue
   else
     FWriter.Key('setter').Value(P.Setter.Name);
-
   FWriter.Key('dispid').Value(P.DispID);
-
   FWriter.Key('args');
   FWriter.BeginArray;
   for i := 0 to P.ParamCount - 1 do
     DumpParam(P.Params[i]);
   FWriter.EndArray;
-
   FWriter.EndObject;
 end;
 
@@ -573,7 +527,6 @@ begin
   DumpSym(MR.InterfaceMethod);
   FWriter.Key('implmeth');
   DumpSym(MR.ImplementingMethod);
-
   FWriter.EndObject;
 end;
 
@@ -584,8 +537,6 @@ begin
   FWriter.Key('level').Value(A.Level);
   FWriter.Key('index').Value(A.Index);
   FWriter.Key('typ').Value(A.ParamType.FullName);
-//  FWriter.Key('modifier');
-//  FWriter.Key('states');
   FWriter.Key('def');
   DumpVal(A.DefaultValue);
   FWriter.EndObject;
@@ -593,7 +544,7 @@ end;
 
 procedure TDump.DumpProp(P: TProperty);
 var
-  i: Integer;
+  i: integer;
 begin
   FWriter.BeginObject;
   DumpSymBase(P);
@@ -603,96 +554,96 @@ begin
     FWriter.Key('getter').NullValue
   else
     FWriter.Key('getter').Value(P.Getter.Name);
-
   if P.Setter = nil then
-    FWriter.Key('setter').NullValue
+    FWriter.Key(
+      'setter').NullValue
   else
     FWriter.Key('setter').Value(P.Setter.Name);
-
   if P.Stored = nil then
     FWriter.Key('stored').NullValue
   else
     FWriter.Key('stored').Value(P.Setter.Name);
-
   FWriter.Key('index').Value(P.Index);
-
   FWriter.Key('def');
   DumpVal(P.DefaultValue);
-
   FWriter.Key('args');
   FWriter.BeginArray;
   for i := 0 to P.ParamCount - 1 do
     DumpParam(P.Params[i]);
   FWriter.EndArray;
-
   FWriter.EndObject;
 end;
 
 procedure TDump.DumpSym(s: TSymbol);
+
   procedure DumpOvrldStub(F: TFunctionDecl);
   begin
     FWriter.BeginObject;
-    FWriter.Key('name').Value(F.Name);
+    FWriter.Key(
+      'name').Value(F.Name);
     FWriter.Key('ovrldindex').Value(F.ID);
     FWriter.EndObject;
   end;
 
 begin
   case s.NodeKind of
-    nkType:
-      if doDumpType in FOptions then DumpType(TType(S));
-    nkVariable:
-      if doDumpVar in FOptions then DumpVar(TVariable(S));
-    nkConstant:
-      if doDumpConst in FOptions then DumpConst(TConstant(S));
-    nkField:
-      if doDumpField in FOptions then DumpField(TField(S));
-    nkProperty:
-      if doDumpProp in FOptions then DumpProp(TProperty(S));
-    nkIntfProperty:
-      if doDumpProp in FOptions then DumpIntfProp(TIntfProperty(S));
-    nkMethod, nkFunc, nkExternalFunc:
-      if doDumpFunc in FOptions then
+    nkType: if doDumpType in FOptions then
+        DumpType(TType(S));
+    nkVariable: if doDumpVar in FOptions then
+        DumpVar(TVariable(S));
+    nkConstant: if doDumpConst in FOptions then
+        DumpConst(TConstant(S));
+    nkField: if doDumpField in FOptions then
+        DumpField(TField(S));
+    nkProperty: if doDumpProp in FOptions then
+        DumpProp(TProperty(S));
+    nkIntfProperty: if doDumpProp in FOptions then
+        DumpIntfProp(TIntfProperty(S));
+    nkMethod, nkFunc, nkExternalFunc: if doDumpFunc in FOptions then
       begin
         if fmOvrldFlag in TFunctionDecl(S).Modifiers then
           DumpOvrldStub(TFunctionDecl(S))
         else
           DumpFunc(TFunctionDecl(S));
       end;
-    nkEnumElement: begin end;
-    nkLabel:
-      if doDumpLabel in FOptions then DumpLabel(TStmtLabel(S));
-    nkMethodResolution:
-      if doDumpMR in FOptions then DumpMR(TMethodResolution(S));
-    nkAccessor:
-      DumpAccessor(TMultiAccessor(S));
-    nkBuiltinFunc: begin end;
-    nkModule: begin end;
-  else
-    Assert(False, 'DumpSym: ' + s.Name + ',' + s.ClassName);
+    nkEnumElement:
+    begin
+    end;
+    nkLabel: if doDumpLabel in FOptions then
+        DumpLabel(TStmtLabel(S));
+    nkMethodResolution: if doDumpMR in FOptions then
+        DumpMR(TMethodResolution(S));
+    nkAccessor: DumpAccessor(TMultiAccessor(S));
+    nkBuiltinFunc:
+    begin
+    end;
+    nkModule:
+    begin
+    end;
+    else
+      Assert(False, 'DumpSym: ' + s.Name + ',' + s.ClassName);
   end;
 end;
 
 procedure TDump.DumpSymBase(S: TSymbol);
 const
-  VisStr: array[TMemberVisibility] of string = (
-    'Default', 'StrictPrivate', 'StrictProtected',
-    'Private', 'Protected', 'Public', 'Published', 'Automated'
-  );
+  VisStr: array[TMemberVisibility] of string =
+    ('Default', 'StrictPrivate', 'StrictProtected', 'Private', 'Protected', 'Public', 'Published', 'Automated');
 begin
   if doDumpLoc in FOptions then
     FWriter.Key('loc').Value(Format('%d,%d', [S.Coord.Row, S.Coord.Col]));
   FWriter.Key('nk').Value(NodeKNames[S.NodeKind]);
-
-  FWriter.Key('name').Value(S.Name);
+  FWriter.
+    Key('name').Value(S.Name);
   FWriter.Key('attr').Value(SymbolAttrStr(S.Attr));
   FWriter.Key('vis').Value(VisStr[S.Visibility]);
 end;
 
 procedure TDump.DumpType(T: TType);
+
   procedure DumpRecordBody(R: TRecordBody);
   var
-    i: Integer;
+    i: integer;
     sym: TSymbol;
   begin
     FWriter.BeginArray;
@@ -722,7 +673,7 @@ procedure TDump.DumpType(T: TType);
 
   procedure DumpClassType(T: TClassType);
   var
-    i: Integer;
+    i: integer;
   begin
     FWriter.Key('align').Value(T.GlobalAlignSize);
     FWriter.Key('classattr').Value(ClassAttrStr(T.ClassAttr));
@@ -738,7 +689,8 @@ procedure TDump.DumpType(T: TType);
     FWriter.Key('interfaces');
     if T.InterfaceCount = 0 then
       FWriter.NullValue
-    else begin
+    else
+    begin
       FWriter.BeginArray;
       for i := 0 to T.InterfaceCount - 1 do
       begin
@@ -746,11 +698,10 @@ procedure TDump.DumpType(T: TType);
       end;
       FWriter.EndArray;
     end;
-    //FWriter.Key('vmt');
-
     FWriter.Key('members');
     FWriter.BeginArray;
-    for i := 0 to T.Symbols.Count-1 do
+    for
+      i := 0 to T.Symbols.Count - 1 do
     begin
       DumpSym(T.Symbols[i]);
     end;
@@ -759,7 +710,7 @@ procedure TDump.DumpType(T: TType);
 
   procedure DumpObjectType(T: TObjectType);
   var
-    i: Integer;
+    i: integer;
   begin
     FWriter.Key('align').Value(T.GlobalAlignSize);
     FWriter.Key('objattr').Value(ObjectAttrStr(T.ObjectAttr));
@@ -769,10 +720,10 @@ procedure TDump.DumpType(T: TType);
       FWriter.Key('base').Value(T.Base.FullName);
     FWriter.Key('vmtentrycount').Value(T.VmtEntryCount);
     FWriter.Key('vmtoffset').Value(T.VmtOffset);
-
     FWriter.Key('members');
     FWriter.BeginArray;
-    for i := 0 to T.Symbols.Count-1 do
+    for i :=
+      0 to T.Symbols.Count - 1 do
     begin
       DumpSym(T.Symbols[i]);
     end;
@@ -781,7 +732,7 @@ procedure TDump.DumpType(T: TType);
 
   procedure DumpInterfaceType(T: TInterfaceType);
   var
-    i: Integer;
+    i: integer;
   begin
     FWriter.Key('guid').Value(GuidToString(T.Guid));
     FWriter.Key('isdisp').Value(T.IsDisp);
@@ -790,10 +741,9 @@ procedure TDump.DumpType(T: TType);
     else
       FWriter.Key('base').Value(T.Base.FullName);
     FWriter.Key('vmtentrycount').Value(T.VmtEntryCount);
-
     FWriter.Key('members');
     FWriter.BeginArray;
-    for i := 0 to T.Symbols.Count-1 do
+    for i := 0 to T.Symbols.Count - 1 do
     begin
       DumpSym(T.Symbols[i]);
     end;
@@ -803,14 +753,15 @@ procedure TDump.DumpType(T: TType);
   procedure DumpEnumValue(E: TEnumValue);
   begin
     FWriter.BeginObject;
-    DumpSymBase(E);
+    DumpSymBase(
+      E);
     FWriter.Key('value').Value(E.Value);
     FWriter.EndObject;
   end;
 
   procedure DumpEnumType(T: TEnumType);
   var
-    i: Integer;
+    i: integer;
   begin
     FWriter.Key('minsize').Value(T.MinEnumSize);
     FWriter.Key('values');
@@ -909,7 +860,7 @@ procedure TDump.DumpType(T: TType);
 
   procedure DumpProcType(T: TProceduralType);
   var
-    i: Integer;
+    i: integer;
   begin
     FWriter.Key('cc').Value(CCNames[T.CallConvention]);
     FWriter.Key('mk').Value(MethKNames[T.MethodKind]);
@@ -920,7 +871,6 @@ procedure TDump.DumpType(T: TType);
       FWriter.Value('void')
     else
       FWriter.Value(T.ReturnType.FullName);
-
     FWriter.Key('args');
     FWriter.BeginArray;
     for i := 0 to T.ParamCount - 1 do
@@ -929,34 +879,38 @@ procedure TDump.DumpType(T: TType);
   end;
 
 begin
-  FWriter.BeginObject;
+  FWriter.
+    BeginObject;
   DumpSymBase(T);
   FWriter.Key('typecode').Value(TypeNames[T.TypeCode]);
   FWriter.Key('size').Value(T.Size);
   case T.TypeCode of
-    typUnknown: begin end;
-    typUntype: begin end;
+    typUnknown:
+    begin
+    end;
+    typUntype:
+    begin
+    end;
     typInt: FWriter.Key('intkind').Value(IntTypeNames[TIntType(T).Kind]);
     typNumeric: FWriter.Key('numkind').Value(NumericTypeNames[TNumericType(T).Kind]);
     typBool: FWriter.Key('boolkind').Value(BoolTypeNames[TBoolType(T).Kind]);
     typChar: FWriter.Key('charkind').Value(CharTypeNames[TCharType(T).Kind]);
     typString: DumpStringType(TStringType(T));
     typVariant: FWriter.Key('isole').Value(TVariantType(T).IsOle);
-
-    typPAnsiChar, typPWideChar: begin end;
-
+    typPAnsiChar, typPWideChar:
+    begin
+    end;
     typPointer: DumpPointerType(TPointerType(T));
-
     typFile: DumpFileType(TFileType(T));
-    typText: begin end;
+    typText:
+    begin
+    end;
     typProcedural: DumpProcType(TProceduralType(T));
-
     typRecord: DumpRecordType(TRecordType(T));
     typClass: DumpClassType(TClassType(T));
     typObject: DumpObjectType(TObjectType(T));
     typInterface: DumpInterfaceType(TInterfaceType(T));
     typClassRef: FWriter.Key('ref').Value(TClassRefType(T).RefType.FullName);
-
     typEnum: DumpEnumType(TEnumType(T));
     typSet: DumpSetType(TSetType(T));
     typSubrange: DumpSubrangeType(TSubrangeType(T));
@@ -971,60 +925,60 @@ end;
 
 procedure TDump.DumpVal(const V: TValueRec);
 const
-  StrOfVT: array[TValueType] of string = (
-    'Empty', 'Int', 'Int64', 'Real', 'Curr', 'Set', 'Bool', 'Str',
-    'WStr', 'AChr', 'WChr', 'Ptr', 'Array', 'Record', 'Symbol',
-    'AddrOf', 'AddrOffset', 'IID', 'IIDStr'
-  );
+  StrOfVT: array[TValueType] of string =
+    ('Empty', 'Int', 'Int64', 'Real', 'Curr', 'Set', 'Bool', 'Str', 'WStr', 'AChr', 'WChr', 'Ptr',
+    'Array', 'Record', 'Symbol', 'AddrOf', 'AddrOffset', 'IID', 'IIDStr');
 var
-  I: Integer;
+  I: integer;
   Sym: TSymbol;
 begin
   FWriter.BeginObject;
-  FWriter.Key('vt').Value(StrOfVT[V.VT]);
+  FWriter.Key('vt').
+    Value(StrOfVT[V.VT]);
   case V.VT of
-    vtEmpty: begin end;
+    vtEmpty:
+    begin
+    end;
     vtInt: FWriter.Key('value').Value(V.VInt);
     vtInt64: FWriter.Key('value').Value(V.VInt64);
     vtReal: FWriter.Key('value').Value(V.VReal);
     vtCurr: FWriter.Key('value').Value(V.VCurr);
     vtBool: FWriter.Key('value').Value(V.VBool);
-    vtStr, vtWStr, vtPtr:
-      FWriter.Key('value').Value(ValToStr(V));
-    vtAChr:
-      if V.VAChr < #32 then
+    vtStr, vtWStr, vtPtr: FWriter.Key('value').Value(ValToStr(V));
+    vtAChr: if V.VAChr < #32 then
         FWriter.Key('value').Value('#' + IntToStr(Ord(V.VAChr)))
       else
         FWriter.Key('value').Value(ValToStr(V));
-    vtWChr:
-      if V.VWChr < 32 then
+    vtWChr: if V.VWChr < 32 then
         FWriter.Key('value').Value('#' + IntToStr(V.VWChr))
       else
         FWriter.Key('value').Value(ValToStr(V));
-    vtSet:
-      if V.VSet = nil then
+    vtSet: if V.VSet = nil then
         FWriter.Key('value').Value('')
       else
         FWriter.Key('value').Value(TSetValue(V.VSet).AsString);
-    vtArray, vtRecord: begin
-      FWriter.Key('value').Value('array/record')
+    vtArray, vtRecord:
+    begin
+      FWriter.Key('value').Value('array/record');
     end;
-
-    vtSymbol: begin
+    vtSymbol:
+    begin
       FWriter.Key('value');
       if V.VSymbol = nil then
         FWriter.NullValue
       else
         FWriter.Value(V.VSymbol.FullName);
     end;
-    vtAddrOfSymbol: begin
+    vtAddrOfSymbol:
+    begin
       FWriter.Key('value');
       if V.VAddr = nil then
         FWriter.NullValue
       else
         FWriter.Value(V.VAddr.FullName);
     end;
-    vtAddrOffset: begin
+    vtAddrOffset:
+    begin
       FWriter.Key('value');
       I := ValGetAddrOffset(V, Sym);
       if Sym = nil then
@@ -1044,7 +998,8 @@ begin
   FWriter.Key('level').Value(V.Level);
   FWriter.Key('index').Value(V.Index);
   FWriter.Key('varattr').Value(VarAttrStr(V.VarAttr));
-  FWriter.Key('state').Value(VarStateStr(V.States));
+  FWriter.Key(
+    'state').Value(VarStateStr(V.States));
   FWriter.Key('typ');
   if V.VarType.Name = '' then
     DumpType(V.VarType)
@@ -1062,11 +1017,9 @@ end;
 
 function TDump.ExprAttrStr(attr: TExprAttributes): string;
 const
-  AttrStr: array[TExprAttribute] of string = (
-    'Verified', 'Invalid', 'Delayed', 'Call', 'ArgList',
-    'OverloadRestrict', 'ArrayProp', 'Inherited', 'Const',
-    'VarCast', 'StrOp', 'VarOp', 'SetOp', 'Res2', 'Res3', 'Res4'
-  );
+  AttrStr: array[TExprAttribute] of string =
+    ('Verified', 'Invalid', 'Delayed', 'Call', 'ArgList', 'OverloadRestrict', 'ArrayProp', 'Inherited',
+    'Const', 'VarCast', 'StrOp', 'VarOp', 'SetOp', 'Res2', 'Res3', 'Res4');
 var
   i: TExprAttribute;
 begin
@@ -1074,15 +1027,13 @@ begin
   for i := Low(TExprAttribute) to High(TExprAttribute) do
     if i in attr then
       Result := Result + AttrStr[i] + ',';
-  if Result <> '' then Delete(Result, Length(Result), 1);
+  if Result <> '' then
+    Delete(Result, Length(Result), 1);
 end;
 
 function TDump.IntfPropAttrStr(attr: TIntfPropertyAttributes): string;
 const
-  AttrStr: array[TIntfPropertyAttribute] of string = (
-    'NoUsed', 'DefaultProp', 'ReadOnly',
-    'WriteOnly', 'HasDispID'
-  );
+  AttrStr: array[TIntfPropertyAttribute] of string = ('NoUsed', 'DefaultProp', 'ReadOnly', 'WriteOnly', 'HasDispID');
 var
   i: TIntfPropertyAttribute;
 begin
@@ -1090,14 +1041,13 @@ begin
   for i := Low(TIntfPropertyAttribute) to High(TIntfPropertyAttribute) do
     if i in attr then
       Result := Result + AttrStr[i] + ',';
-  if Result <> '' then Delete(Result, Length(Result), 1);
+  if Result <> '' then
+    Delete(Result, Length(Result), 1);
 end;
 
 function TDump.ObjectAttrStr(attr: TObjectAttributes): string;
 const
-  AttrStr: array[TObjectAttribute] of string = (
-    'hasvirtual', 'hasvmt', 'beginvmt'
-  );
+  AttrStr: array[TObjectAttribute] of string = ('hasvirtual', 'hasvmt', 'beginvmt');
 var
   i: TObjectAttribute;
 begin
@@ -1105,14 +1055,13 @@ begin
   for i := Low(TObjectAttribute) to High(TObjectAttribute) do
     if i in attr then
       Result := Result + AttrStr[i] + ',';
-  if Result <> '' then Delete(Result, Length(Result), 1);
+  if Result <> '' then
+    Delete(Result, Length(Result), 1);
 end;
 
 function TDump.PropAttrStr(attr: TPropertyAttributes): string;
 const
-  AttrStr: array[TPropertyAttribute] of string = (
-    'NoDefault', 'NoStored', 'DefaultProp'
-  );
+  AttrStr: array[TPropertyAttribute] of string = ('NoDefault', 'NoStored', 'DefaultProp');
 var
   i: TPropertyAttribute;
 begin
@@ -1120,15 +1069,13 @@ begin
   for i := Low(TPropertyAttribute) to High(TPropertyAttribute) do
     if i in attr then
       Result := Result + AttrStr[i] + ',';
-  if Result <> '' then Delete(Result, Length(Result), 1);
-
+  if Result <> '' then
+    Delete(Result, Length(Result), 1);
 end;
 
 function TDump.StructAttrStr(attr: TStructAttributes): string;
 const
-  AttrStr: array[TStructAttribute] of string = (
-    'NeedInit', 'NeedFree'
-  );
+  AttrStr: array[TStructAttribute] of string = ('NeedInit', 'NeedFree');
 var
   i: TStructAttribute;
 begin
@@ -1136,14 +1083,14 @@ begin
   for i := Low(TStructAttribute) to High(TStructAttribute) do
     if i in attr then
       Result := Result + AttrStr[i] + ',';
-  if Result <> '' then Delete(Result, Length(Result), 1);
+  if Result <> '' then
+    Delete(Result, Length(Result), 1);
 end;
 
 function TDump.SymbolAttrStr(attr: TSymbolAttributes): string;
 const
-  AttrStr: array[TSymbolAttribute] of string = (
-    'Used', 'Reserved1', 'Internal', 'Forward', 'Static', 'Class', 'Primitive', 'Temp'
-  );
+  AttrStr: array[TSymbolAttribute] of string =
+    ('Used', 'Reserved1', 'Internal', 'Forward', 'Static', 'Class', 'Primitive', 'Temp');
 var
   i: TSymbolAttribute;
 begin
@@ -1151,15 +1098,14 @@ begin
   for i := Low(TSymbolAttribute) to High(TSymbolAttribute) do
     if i in attr then
       Result := Result + AttrStr[i] + ',';
-  if Result <> '' then Delete(Result, Length(Result), 1);
+  if Result <> '' then
+    Delete(Result, Length(Result), 1);
 end;
 
 function TDump.VarAttrStr(attr: TVarAttributes): string;
 const
-  AttrStr: array[TVarAttribute] of string = (
-    'Reserved1', 'Reserved2', 'ReadOnly', 'Local', 'Hidden',
-    'Tls', 'Result', 'Self'
-  );
+  AttrStr: array[TVarAttribute] of string =
+    ('Reserved1', 'Reserved2', 'ReadOnly', 'Local', 'Hidden', 'Tls', 'Result', 'Self');
 var
   i: TVarAttribute;
 begin
@@ -1167,25 +1113,24 @@ begin
   for i := Low(TVarAttribute) to High(TVarAttribute) do
     if i in attr then
       Result := Result + AttrStr[i] + ',';
-  if Result <> '' then Delete(Result, Length(Result), 1);
+  if Result <> '' then
+    Delete(Result, Length(Result), 1);
 end;
 
 function TDump.VarStateStr(stat: TVarStates): string;
 const
-  StateStr: array[TVarState] of string = (
-    'Init', 'NestRef', 'ResultAddr', 'NeedInit', 'NeedFree', 'Temp'
-  );
+  StateStr: array[TVarState] of string = ('Init', 'NestRef', 'ResultAddr', 'NeedInit', 'NeedFree', 'Temp');
 var
   i: TVarState;
 begin
   Result := '';
-  for i := Low(TVarState) to High(TVarState) do
+  for
+    i := Low(TVarState) to High(TVarState) do
     if i in stat then
       Result := Result + StateStr[i] + ',';
-  if Result <> '' then Delete(Result, Length(Result), 1);
+  if Result <> '' then
+    Delete(Result, Length(Result), 1);
 end;
-
-{ TJsonDump }
 
 constructor TJsonDump.Create;
 begin

@@ -1,102 +1,68 @@
 unit llvm_codepack;
 
 {$IFDEF FPC}
-{$mode delphi}{$H+}
+{$mode delphi}
+{$H+}{$J-}
 {$ENDIF}
 
 interface
+
 uses Classes, SysUtils, ast, cntx, hashtable, inst;
 
 type
-  {
-  特殊类型: string,interface,dynamicarray,variant,set,record
-  这些类型需要自动清理或者尺寸太大不能直接返回。
-
-   1.调整Variant, string操作为函数调用
-   2.对于某些内部函数的调用调整为实际函数的调用
-   3.用Jump语句取代if, while, repeat, for，
-   4.对于返回特殊类型的函数，需要分配变量来接收这些返回值。
-   5.把property展开成直接存取字段或函数调用。
-   6.把finally 分解成嵌套函数。
-   7.处理 except 块：编译成 if E is EXxxxx then 之类形式。
-   8.处理 构造函数 中调用另一个构造函数进行初始化的问题
-   9.字符串字面量、Set字面量转成TConstant
-  }
-
   TCode = class
   public
-    Cmds: TList;
-    Vars: TList; // TFuncParam, TVariable
-//    Consts: THashTable; // TConstant
-    Funcs: TList;
+    Cmds: TFPList;
+    Vars: TFPList;
+    Funcs: TFPList;
     VarCleanFunc: TFunction;
   public
     constructor Create;
     destructor Destroy; override;
   end;
 
-//  TCmd = TExpr;
-//  TUnaryOp = TUnaryExpr;
-
-  { TCodePack }
-
   TCodePack = class
   private
-    FFunc: TFunction;     // 顶层函数(level=0)
-    FCurFunc: TFunction;  // 当前处理的函数。
+    FFunc: TFunction;
+    FCurFunc: TFunction;
     FContext: TCompileContext;
     FCurCode: TCode;
     FStrConstList, FSetConstList: THashTable;
-//    FCleanupList: TList;
-    FCleanupStack: TList;
-    FCleanupIndex: Integer;
-    FExceptCount: Integer; // 异常处理嵌套个数，处于最外层为1
-    //FExprStmts: TPtrHashtable;
-    FNodes: TList;
-    FVarID, FFuncID, FLabelID, FLevelID: Integer;
+    FCleanupStack: TFPList;
+    FCleanupIndex: integer;
+    FExceptCount: integer;
+    FNodes: TFPList;
+    FVarID, FFuncID, FLabelID, FLevelID: integer;
     FSelfSym, FResultSym: TSymbol;
     FSelfTypeSym: TSymbol;
     FExceptVar, FExPtrVar: TVariable;
-    FExceptVarID: Integer;
-    FExceptVarStack: TList;
-    //FSetBytesType: TOpenArrayType;
-    //FByteSetType: TSetType;
+    FExceptVarID: integer;
+    FExceptVarStack: TFPList;
     FBreakLabel, FContinueLabel, FQuitLabel: string;
-
     procedure CopyAttr(Op: TBaseOp; E: TExpr);
     function CopyOp(E: TBaseOp): TBaseOp;
     function CreateOpFrom(E: TExpr): TBaseOp;
-
-    function CreateListOp(const Coord: TAstNodeCoord; const Args: array of TBaseOp; Start: Integer = 0): TListOp; overload;
+    function CreateListOp(const Coord: TAstNodeCoord; const Args: array of TBaseOp; Start: integer = 0): TListOp; overload;
     function CreateListOp(const Coord: TAstNodeCoord): TListOp; overload;
     function CreateListOpFrom(E: TExpr): TListOp;
-
     function CreateUnaryOp(Op: TOpCode; const Coord: TAstNodeCoord): TUnaryOp;
     function CreateUnaryOpFrom(E: TUnaryExpr): TUnaryOp;
-
     function CreateBinaryOp(Op: TOpCode; const Coord: TAstNodeCoord): TBinaryOp;
     function CreateBinaryOpFrom(E: TBinaryExpr): TBinaryOp;
-
     function CreateSymbolOp(Sym: TSymbol; const Coord: TAstNodeCoord): TSymbolOp;
     function CreateSymbolOpFrom(E: TSymbolExpr): TSymbolOp;
-
     function CreateConstOp(const Coord: TAstNodeCoord): TConstOp; overload;
-    function CreateConstOp(const Coord: TAstNodeCoord; V: Integer): TConstOp; overload;
-    function CreateConstOp(const Coord: TAstNodeCoord; V: Int64): TConstOp; overload;
+    function CreateConstOp(const Coord: TAstNodeCoord; V: integer): TConstOp; overload;
+    function CreateConstOp(const Coord: TAstNodeCoord; V: int64): TConstOp; overload;
     function CreateConstOp(const Coord: TAstNodeCoord; const V: TValueRec): TConstOp; overload;
     function CreateConstOpFrom(E: TConstExpr): TConstOp;
-
     function CreateFunc: TFunction;
     function CreateCmd(Cmd: TCmdClass; const Coord: TAstNodeCoord): TCmd;
-
     function CreateNode(NodeClass: TAstNodeClass): TAstNode;
-
     procedure CreateExPtrVar;
     function CreateExVar: TVariable;
-
     procedure RemoveNode(Node: TObject);
     procedure AddRawArgs;
-
     procedure SetupStmt(Stmt: TStatement);
     procedure SetupStmt_Assign(Stmt: TAssignmentStmt);
     procedure SetupStmt_Try(Stmt: TTryStmt);
@@ -107,7 +73,6 @@ type
     procedure SetupStmt_Call(Stmt: TCallStmt);
     procedure SetupStmt_Raise(Stmt: TRaiseStmt);
     procedure SetupStmt_Case(Stmt: TCaseStmt);
-
     function EmitExpr(E: TExpr): TBaseOp;
     function EmitExpr_StrCmp(E: TBinaryExpr): TBaseOp;
     function EmitExpr_VarCmp(E: TBinaryExpr): TBinaryOp;
@@ -117,80 +82,44 @@ type
     function EmitExpr_UnaryVarOp(E: TUnaryExpr): TBaseOp;
     function EmitExpr_SetOp(E: TBinaryExpr): TBaseOp;
     function EmitExpr_Set(E: TUnaryExpr): TBaseOp;
-    // 取函数/方法的指针
     function EmitExpr_ProcAddr(E: TUnaryExpr): TBaseOp;
-    // 处理成员访问。
     function EmitExpr_Member(E: TBinaryExpr): TBaseOp;
-    // 处理符号表达式。
     function EmitExpr_Symbol(E: TSymbolExpr): TBaseOp;
-    // 处理常量
     function EmitExpr_Const(E: TConstExpr): TBaseOp;
-    // 处理调用。AsgOp用于存贮返回值 有可能返回nil
     function EmitExpr_Call(E: TBinaryExpr; AsgOp: TBaseOp = nil): TBaseOp;
-    // 处理调用。 有可能返回nil
     function EmitExpr_Builtin(E: TBinaryExpr; Sym: TBuiltinFunction): TBaseOp;
     function EmitExpr_In(E: TBinaryExpr): TBaseOp;
     function EmitExpr_Is(E: TBinaryExpr): TBaseOp;
     function EmitExpr_As(E: TBinaryExpr): TBaseOp;
     function EmitCallOp(CallOp: TBinaryOp; AsgOp: TBaseOp = nil): TBaseOp;
-
-    // 把E转成接口。AsgOp用于存贮结果
     procedure EmitIntfCastOp(E: TBinaryExpr; AsgOp: TBaseOp);
-
-    // 把Obj转成接口。Obj.Typ必须是typClass
-    function EmitObj2Intf(Obj: TBaseOp; Intf: TInterfaceType; DoCast: Boolean = False): TBaseOp; overload;
-    procedure EmitObj2Intf(Obj, AsgOp: TBaseOp; Intf: TInterfaceType; DoCast: Boolean = False); overload;
-
+    function EmitObj2Intf(Obj: TBaseOp; Intf: TInterfaceType; DoCast: boolean = False): TBaseOp; overload;
+    procedure EmitObj2Intf(Obj, AsgOp: TBaseOp; Intf: TInterfaceType; DoCast: boolean = False); overload;
     function EmitStrCmp(E: TBinaryOp): TBaseOp;
     function EmitStrAddOp(E: TBinaryExpr): TSymbolOp; overload;
-    // 处理字符串相加。
     procedure EmitStrAddOp(E: TBinaryExpr; AsgOp: TBaseOp); overload;
     procedure EmitStrAsg(E, Dest: TBaseOp);
-    // 发出一个函数调用。AsgOp用于存贮返回值（特殊类型如Variant,string等）
     procedure EmitCallSpecial(E: TBinaryExpr; AsgOp: TBaseOp);
-    // 对表达式E调用一次 _VarCopy，结果存于Dest。 将使用E和Dest
     procedure EmitVarCopy(E, Dest: TBaseOp); overload;
-    // 对表达式E调用一次 _VarCopy，结果存于一临时变量，返回这个变量的表达式
-    // 将使用表达式E
     function EmitVarCopy(E: TBaseOp): TSymbolOp; overload;
-
-    // 对表达式E调用_VarFromXXX转换Variant，结果存于Dest。
-    // 如果E已经是Variant，或ToOle=True并且E已经是OleVariant，则不处理。
-    // 注意：将移动E和Dest的位置
-    procedure EmitCastToVar(E, Dest: TBaseOp; ToOle: Boolean = False); overload;
-    // 对表达式E调用_VarFromXXX转换Variant，结果存于一个临时变量，返回这个变量的表达式
-    function EmitCastToVar(E: TBaseOp; ToOle: Boolean = False): TSymbolOp; overload;
-
-    // 转换字符串类型。 转换的结果存入临时变量，并返回这个变量的表达式
-    // typ是目标类型. strAnsi..strWShort
+    procedure EmitCastToVar(E, Dest: TBaseOp; ToOle: boolean = False); overload;
+    function EmitCastToVar(E: TBaseOp; ToOle: boolean = False): TSymbolOp; overload;
     function EmitCastToStr(E: TBaseOp; typ: TStringType): TSymbolOp; overload;
-    // 转换字符串类型。 Dest是可被赋值的表达式，转换的结果存入此表达式中
-    // typ是目标类型. strAnsi..strWShort
-    // 注意：将移动E和Dest的位置
     procedure EmitCastToStr(E, Dest: TBaseOp; typ: TStringType); overload;
-
     procedure EmitCastToDynArray(E, Dest: TBaseOp); overload;
     function EmitCastToDynArray(E: TBaseOp; dynTyp: TType): TBaseOp; overload;
-
-    function EmitOAInitStmt(const Coord: TAstNodeCoord; ElemType: TType;
-      const Args: array of TBaseOp; Start: Integer = 0): TSymbolOp;
+    function EmitOAInitStmt(const Coord: TAstNodeCoord; ElemType: TType; const Args: array of TBaseOp;
+      Start: integer = 0): TSymbolOp;
     procedure EmitMarkCmd(const Lab: string; const Coord: TAstNodeCoord);
     procedure EmitGotoCmd(const Target: string; const Coord: TAstNodeCoord);
-    procedure EmitCallCmd(Func: TFunctionDecl; const Coord: TAstNodeCoord;
-      const Args: array of TBaseOp);
-
-//    function EmitProcAddr(E: TExpr): TBaseOp;
-
-    // 创建一个Call表达式
-    function CreateCall(Func: TFunctionDecl; const Coord: TAstNodeCoord;
-      const Args: array of TBaseOp): TBinaryOp;
-    // 添加字符串常量到列表，相同的字符串和类型不会再次添加
+    procedure EmitCallCmd(Func: TFunctionDecl; const Coord: TAstNodeCoord; const Args: array of TBaseOp);
+    function CreateCall(Func: TFunctionDecl; const Coord: TAstNodeCoord; const Args: array of TBaseOp): TBinaryOp;
     function AddStrConst(const s: UTF8String; typ: TType): TConstant;
     function AddSetConst(V: TSetValue): TVariable;
     function AddVar(T: TType): TVariable;
     procedure AddFunc(F: TFunction);
     procedure AddCmd(Cmd: TCmd);
-    procedure AttachStmt(E: TBaseOp; Start: Integer);
+    procedure AttachStmt(E: TBaseOp; Start: integer);
     procedure AddNode(Node: TObject);
     function LabelStr(const prefix: string = 'L.'): string;
     procedure SetupFunc(F: TFunction);
@@ -198,12 +127,12 @@ type
     constructor Create;
     destructor Destroy; override;
     procedure Setup(Acntx: TCompileContext; Func: TFunction);
-    procedure Dump(List : TStrings);
+    procedure Dump(List: TStrings);
     property StrConstList: THashTable read FStrConstList write FStrConstList;
     property SetConstList: THashTable read FSetConstList write FSetConstList;
   end;
 
-function IsSpecialType(typ: TType): Boolean;
+function IsSpecialType(typ: TType): boolean;
 
 implementation
 
@@ -217,78 +146,63 @@ begin
   raise ECompileContextError.CreateFmt('TCodePack.' + S, Args);
 end;
 
-// 是否特殊类型.
-// 这种类型当返回值,不能直接返回,需要由调用方提供接收地址
-function IsSpecialType(typ: TType): Boolean;
+function IsSpecialType(typ: TType): boolean;
 begin
   typ := typ.OriginalType;
-  Result := typ.TypeCode in [typString, typRecord, typObject, typVariant,
-      typArray, typDynamicArray, typInterface];
+  Result := typ.TypeCode in [typString, typRecord, typObject, typVariant, typArray, typDynamicArray, typInterface];
   if not Result then
-    Result := ((typ.TypeCode = typSet) and (typ.Size > 4))
-//      or ((typ.TypeCode = typProcedural) and (TProceduralType(typ).IsMethodPointer));
+    Result := ((typ.TypeCode = typSet) and (typ.Size > 4));
 end;
 
-function IsStructType(T: TType): Boolean;
+function IsStructType(T: TType): boolean;
 const
-  StructTypes = [typString, typVariant, 
-    typRecord, typObject, typArray, typSet, typOpenArray]; // set如果小于4字节不当成结构类型
-
+  StructTypes = [typString, typVariant, typRecord, typObject, typArray, typSet, typOpenArray];
 begin
   T := T.OriginalType;
   case T.TypeCode of
-    typSet: Result := T.Size > 4;
-//    typProcedural: Result := T.IsMethodPointer;
+    typSet:
+      Result := T.Size > 4;
     typString: Result := TStringType(T).Kind in [strWShort, strAShort];
-  else
-    Result := T.TypeCode in StructTypes;
+    else
+      Result := T.TypeCode in StructTypes;
   end;
 end;
 
-function NeedFree(T: TType): Boolean;
+function NeedFree(T: TType): boolean;
 begin
   case T.TypeCode of
     typArray: Result := staNeedInit in TArrayType(T).ArrayAttr;
     typRecord: Result := staNeedInit in TRecordType(T).RecordAttr;
     typString: Result := not (TStringType(T).Kind in [strAShort, strWShort]);
-  else
-    Result := T.TypeCode in AutoFreeTypes;
+    else
+      Result := T.TypeCode in AutoFreeTypes;
   end;
 end;
 
-const  // 遵从System.pas的定义
-  opVarAdd =        0;
-  opVarSub =        1;
-  opVarMul =        2;
-  opVarDiv =        3;
-  opVarIntDiv =     4;
-  opVarMod =        5;
-  opVarSHL =        6;
-  opVarSHR =        7;
-  opVarAnd =        8;
-  opVarOr =         9;
-  opVarXor =        10;
-  opVarCompare =    11;
-  opVarNeg =        12;
-  opVarNot =        13;
-
-  opVarCmpEQ =      14;
-  opVarCmpNE =      15;
-  opVarCmpLT =      16;
-  opVarCmpLE =      17;
-  opVarCmpGT =      18;
-  opVarCmpGE =      19;
-
-  VarOpMaps: array[opNE..opSHR] of Integer = (
-//  opNE,       opEQ,       opLT,       opLE,       opGT,       opGE,       opIN, opIS, opAS,
-    opVarCmpNE, opVarCmpEQ, opVarCmpLT, opVarCmpLE, opVarCmpGT, opVarCmpGE, -1,   -1,   -1,
-//  opADD,    opSUB,    opOR,     opXOR,
-    opVarAdd, opVarSub, opVarOR, opVarXor,
-//  opMUL,    opFDIV,   opIDIV,      opMOD,    opAND,    opSHL,    opSHR,
-    opVarMul, opVarDiv, opVarIntDiv, opVarMod, opVarAnd, opVarSHL, opVarSHR
-  );
-
-{ TCodePack }
+const
+  opVarAdd = 0;
+  opVarSub = 1;
+  opVarMul = 2;
+  opVarDiv = 3;
+  opVarIntDiv = 4;
+  opVarMod = 5;
+  opVarSHL = 6;
+  opVarSHR = 7;
+  opVarAnd = 8;
+  opVarOr = 9;
+  opVarXor = 10;
+  opVarCompare = 11;
+  opVarNeg = 12;
+  opVarNot = 13;
+  opVarCmpEQ = 14;
+  opVarCmpNE = 15;
+  opVarCmpLT = 16;
+  opVarCmpLE = 17;
+  opVarCmpGT = 18;
+  opVarCmpGE = 19;
+  VarOpMaps: array[opNE..opSHR] of integer =
+    (opVarCmpNE, opVarCmpEQ, opVarCmpLT, opVarCmpLE, opVarCmpGT, opVarCmpGE, -1, -1, -1, opVarAdd,
+    opVarSub, opVarOR, opVarXor, opVarMul, opVarDiv, opVarIntDiv, opVarMod, opVarAnd, opVarSHL, opVarSHR);
 
 procedure TCodePack.AddCmd(Cmd: TCmd);
 begin
@@ -307,17 +221,14 @@ end;
 
 procedure TCodePack.AddRawArgs;
 begin
-  //if FFunction.NodeKind = nkMethod then
-//  begin
-//  end;
 end;
 
 function TCodePack.AddSetConst(V: TSetValue): TVariable;
 var
   s: string;
 begin
-  if V = nil then V := TSetValue.Create;
-
+  if V = nil then
+    V := TSetValue.Create;
   s := V.AsString;
   Result := TVariable(FSetConstList.Get(s));
   if Result = nil then
@@ -332,7 +243,8 @@ begin
     ValFromSet(Result.Value, V);
     V := nil;
   end;
-  if V <> nil then V.Free;
+  if V <> nil then
+    V.Free;
 end;
 
 function TCodePack.AddStrConst(const s: UTF8String; typ: TType): TConstant;
@@ -351,27 +263,23 @@ begin
       Exit;
     end;
   until p = nil;
-
   Result := TConstant.Create;
   List.Put(S, Result);
-//  AddNode(Result); //不需要加入，因为StrConstList是外面传入的
   case typ.TypeCode of
     typPWideChar: Result.Name := 'const.pw.';
     typPAnsiChar: Result.Name := 'const.pa.';
-    typString:
-      case TStringType(typ).Kind of
+    typString: case TStringType(typ).Kind of
         strAnsi: Result.Name := 'const.as.';
         strWide: Result.Name := 'const.ws.';
-        strUnicode: Result.name := 'const.us.';
+        strUnicode: Result.Name := 'const.us.';
         strAShort: Result.Name := 'const.sas.';
         strWShort: Result.Name := 'const.sws.';
-      else
-        Assert(False);
+        else
+          Assert(False);
       end;
-  else
-    Assert(False);
+    else
+      Assert(False);
   end;
-
   Result.Parent := FFunc.Module;
   Result.ConstType := typ;
   Include(Result.Attr, saInternal);
@@ -389,33 +297,28 @@ begin
   Result.Parent := FCurFunc;
   Include(Result.VarAttr, vaHidden);
   Include(Result.VarAttr, vaLocal);
-//  Include(Result.States, vsNestRef);
   Include(Result.Attr, saTemp);
   Include(Result.Attr, saUsed);
   AddNode(Result);
   FCurCode.Vars.Add(Result);
 end;
 
-procedure TCodePack.AttachStmt(E: TBaseOp; Start: Integer);
+procedure TCodePack.AttachStmt(E: TBaseOp; Start: integer);
 var
-  i: Integer;
-  FStmts: TList;
+  i: integer;
+  FStmts: TFPList;
   S: TCmd;
 begin
-  if E = nil then Exit;
+  if E = nil then
+    Exit;
   FStmts := FCurCode.Cmds;
-  if Start >= FStmts.Count then Exit;
-//  if E.OpCode <> opcSymbol then
-//  begin
-//    Assert(False);
-//  end;
-
+  if Start >= FStmts.Count then
+    Exit;
   for i := Start to FStmts.Count - 1 do
   begin
     S := TCmd(FStmts[i]);
     E.AddCmd(S);
   end;
-
   for i := FStmts.Count - 1 downto Start do
     FStmts.Delete(i);
 end;
@@ -448,7 +351,8 @@ begin
     Result := CreateConstOp(E.Coord);
     ValCopy(TConstOp(Result).Value, TConstOp(E).Value);
   end
-  else begin
+  else
+  begin
     Err('Unknown type of inst');
     Result := nil;
   end;
@@ -459,14 +363,12 @@ end;
 
 constructor TCodePack.Create;
 begin
-//  FCleanupList := TList.Create;
-  FCleanupStack := TList.Create;
-  FNodes := TList.Create;
+  FCleanupStack := TFPList.Create;
+  FNodes := TFPList.Create;
   FNodes.Capacity := 64;
 end;
 
-function TCodePack.CreateBinaryOp(Op: TOpCode;
-  const Coord: TAstNodeCoord): TBinaryOp;
+function TCodePack.CreateBinaryOp(Op: TOpCode; const Coord: TAstNodeCoord): TBinaryOp;
 begin
   Result := TBinaryOp.Create;
   Result.OpCode := Op;
@@ -482,8 +384,8 @@ begin
   CopyAttr(Result, E);
 end;
 
-function TCodePack.CreateCall(Func: TFunctionDecl;
-  const Coord: TAstNodeCoord; const Args: array of TBaseOp): TBinaryOp;
+function TCodePack.CreateCall(Func: TFunctionDecl; const Coord: TAstNodeCoord;
+  const Args: array of TBaseOp): TBinaryOp;
 begin
   Result := CreateBinaryOp(opcCALL, Coord);
   Result.Left := CreateSymbolOp(Func, Coord);
@@ -494,43 +396,37 @@ begin
     Result.Typ := Func.ReturnType.NormalType;
 end;
 
-function TCodePack.CreateCmd(Cmd: TCmdClass;
-  const Coord: TAstNodeCoord): TCmd;
+function TCodePack.CreateCmd(Cmd: TCmdClass; const Coord: TAstNodeCoord): TCmd;
 begin
   Result := Cmd.Create;
   Result.Coord := Coord;
   AddNode(Result);
 end;
 
-function TCodePack.CreateConstOp(
-  const Coord: TAstNodeCoord): TConstOp;
+function TCodePack.CreateConstOp(const Coord: TAstNodeCoord): TConstOp;
 begin
   Result := TConstOp.Create;
   Result.Coord := Coord;
   AddNode(Result);
 end;
 
-function TCodePack.CreateConstOp(const Coord: TAstNodeCoord; V: Int64
-  ): TConstOp;
+function TCodePack.CreateConstOp(const Coord: TAstNodeCoord; V: int64): TConstOp;
 begin
   Result := CreateConstOp(Coord);
   Result.Typ := FContext.FInt64Type;
   ValFromInt(Result.Value, V);
 end;
 
-function TCodePack.CreateConstOp(const Coord: TAstNodeCoord;
-  V: Integer): TConstOp;
+function TCodePack.CreateConstOp(const Coord: TAstNodeCoord; V: integer): TConstOp;
 begin
   Result := CreateConstOp(Coord);
   Result.Typ := FContext.FIntegerType;
   ValFromInt(Result.Value, V);
 end;
 
-function TCodePack.CreateConstOp(const Coord: TAstNodeCoord;
-  const V: TValueRec): TConstOp;
+function TCodePack.CreateConstOp(const Coord: TAstNodeCoord; const V: TValueRec): TConstOp;
 begin
   Result := CreateConstOp(Coord);
-
   case V.VT of
     vtInt: Result.Typ := FContext.FIntegerType;
     vtInt64: Result.Typ := FContext.FInt64Type;
@@ -539,8 +435,8 @@ begin
     vtStr, vtWStr: Result.Typ := FContext.FUnicodeStringType;
     vtAChr: Result.Typ := FContext.FAnsiCharType;
     vtWChr: Result.Typ := FContext.FWideCharType;
-  else
-    Err('CreateConstExpr');
+    else
+      Err('CreateConstExpr');
   end;
   ValCopy(Result.Value, V);
 end;
@@ -567,9 +463,7 @@ begin
     FExPtrVar.Level := FCurFunc.Level;
     FExPtrVar.VarAttr := [vaLocal, vaHidden];
     Include(FExPtrVar.Attr, saUsed);
-  //  FCurFunc.LocalSymbols.Add(FExPtrVar);
     FCurCode.Vars.Add(FExPtrVar);
-
     LExSelVar := TVariable.Create;
     AddNode(LExSelVar);
     LExSelVar.VarType := FContext.FIntegerType;
@@ -577,7 +471,6 @@ begin
     LExSelVar.Level := FCurFunc.Level;
     LExSelVar.VarAttr := [vaLocal, vaHidden];
     Include(LExSelVar.Attr, saUsed);
-  //  FCurFunc.LocalSymbols.Add(LExSelVar);
     FCurCode.Vars.Add(LExSelVar);
   end;
 end;
@@ -586,13 +479,11 @@ function TCodePack.CreateExVar: TVariable;
 begin
   Inc(FExceptVarID);
   Result := TVariable(CreateNode(TVariable));
-
   Result.VarType := FContext.FTObjectType;
   Result.Name := '$ex' + IntToStr(FExceptVarID);
   Result.Level := FCurFunc.Level;
   Result.VarAttr := [vaLocal, vaHidden];
   Include(Result.Attr, saUsed);
-//  FCurFunc.LocalSymbols.Add(Result);
   FCurCode.Vars.Add(Result);
 end;
 
@@ -602,14 +493,14 @@ begin
   AddNode(Result);
 end;
 
-function TCodePack.CreateListOp(const Coord: TAstNodeCoord;
-  const Args: array of TBaseOp; Start: Integer): TListOp;
+function TCodePack.CreateListOp(const Coord: TAstNodeCoord; const Args: array of TBaseOp; Start: integer): TListOp;
 var
-  i: Integer;
+  i: integer;
 begin
   Result := CreateListOp(Coord);
   Result.Typ := FContext.FUntype;
-  for i := Start to High(Args) do
+  for i := Start
+    to High(Args) do
   begin
     TListOp(Result).Add(Args[i]);
   end;
@@ -644,14 +535,13 @@ begin
     opkConst: Result := CreateConstOpFrom(TConstExpr(E));
     opkSymbol: Result := CreateSymbolOpFrom(TSymbolExpr(E));
     opkList: Result := CreateListOpFrom(TListExpr(E));
-  else
-    Assert(False, 'CreateOpFrom');
-    Result := nil;
+    else
+      Assert(False, 'CreateOpFrom');
+      Result := nil;
   end;
 end;
 
-function TCodePack.CreateSymbolOp(Sym: TSymbol;
-  const Coord: TAstNodeCoord): TSymbolOp;
+function TCodePack.CreateSymbolOp(Sym: TSymbol; const Coord: TAstNodeCoord): TSymbolOp;
 begin
   Result := TSymbolOp.Create;
   Result.Coord := Coord;
@@ -667,8 +557,8 @@ begin
       nkField: Result.Typ := TField(Sym).FieldType;
       nkProperty: Result.Typ := TProperty(Sym).PropType;
       nkIntfProperty: Result.Typ := TIntfProperty(Sym).PropType;
-    else
-      Result.Typ := FContext.FUntype;
+      else
+        Result.Typ := FContext.FUntype;
     end;
   end;
   AddNode(Result);
@@ -684,8 +574,7 @@ begin
   CopyAttr(Result, E);
 end;
 
-function TCodePack.CreateUnaryOp(Op: TOpCode;
-  const Coord: TAstNodeCoord): TUnaryOp;
+function TCodePack.CreateUnaryOp(Op: TOpCode; const Coord: TAstNodeCoord): TUnaryOp;
 begin
   Result := TUnaryOp.Create;
   Result.OpCode := Op;
@@ -703,24 +592,22 @@ end;
 
 destructor TCodePack.Destroy;
 var
-  i: Integer;
+  i: integer;
 begin
-//  FCleanupList.Free;
   FCleanupStack.Free;
   FExceptVarStack.Free;
-  for i := 0 to FNodes.Count-1 do
+  for i := 0 to FNodes.Count - 1 do
     TObject(FNodes[i]).Free;
   FNodes.Free;
-  inherited Destroy;
+  inherited
+  Destroy;
 end;
 
 procedure TCodePack.Dump(List: TStrings);
 begin
-
 end;
 
-procedure TCodePack.EmitCallCmd(Func: TFunctionDecl;
-  const Coord: TAstNodeCoord; const Args: array of TBaseOp);
+procedure TCodePack.EmitCallCmd(Func: TFunctionDecl; const Coord: TAstNodeCoord; const Args: array of TBaseOp);
 var
   S: TCallCmd;
 begin
@@ -731,73 +618,55 @@ end;
 
 function TCodePack.EmitCallOp(CallOp: TBinaryOp; AsgOp: TBaseOp): TBaseOp;
 
-  // 检查这两个符号是否 TClassType ，并且处于同一继承分枝，
-  // p1和p2等同或者p2在分枝上更靠近根部
-  function IsSameBranch(p1, p2: TSymbol): Boolean;
+  function IsSameBranch(p1, p2: TSymbol): boolean;
   begin
-    Result := (p1.NodeKind = nkType) and (p2.NodeKind = nkType)
-      and (TType(p1).TypeCode = typClass)
-      and (TType(p2).TypeCode = typClass)
-      and ((p1 = p2) or
-           (TClassType(p1).IsInheritedFrom(TClassType(p2)))
-           );
+    Result := (p1.NodeKind = nkType) and (p2.NodeKind = nkType) and (TType(p1).TypeCode = typClass) and
+      (TType(p2).TypeCode = typClass) and ((p1 = p2) or (TClassType(p1).IsInheritedFrom(TClassType(p2))));
   end;
 
-  function IsSelf(Op: TBaseOp): Boolean;
+  function IsSelf(Op: TBaseOp): boolean;
   var
     sym: TSymbol;
   begin
-    // 在 EmitExpr_Symbol 中已经调整了。访问当前类成员必定添加 Self
-    Result := (Op.OpCode = opcMember)
-            and (TBinaryOp(Op).Left.OpCode = opcSymbol);
+    Result := (Op.OpCode = opcMember) and (TBinaryOp(Op).Left.OpCode = opcSymbol);
     if Result then
     begin
       Sym := TSymbolOp(TBinaryOp(Op).Left).Reference;
-      result := (sym.NodeKind = nkVariable) and
-                (vaSelf in TVariable(sym).VarAttr);
+      Result := (sym.NodeKind = nkVariable) and (vaSelf in TVariable(sym).VarAttr);
     end;
   end;
 
-  // 判断是否在构造器中调用另一个构造器
-  function IsCallCtorInCtor(L: TBaseOp; Fun: TFunction; Sym: TSymbol): Boolean;
+  function IsCallCtorInCtor(L: TBaseOp; Fun: TFunction; Sym: TSymbol): boolean;
   begin
-    Result := (Fun.NodeKind = nkMethod)
-        and (TMethod(Fun).MethodKind = mkConstructor)
-        and (Sym <> nil)
-        and (Sym.NodeKind = nkMethod)
-        and (TMethod(Sym).MethodKind = mkConstructor)
-        and IsSelf(L)
-        and IsSameBranch(Fun.Parent, Sym.Parent);
+    Result := (Fun.NodeKind = nkMethod) and (TMethod(Fun).MethodKind = mkConstructor) and
+      (Sym <> nil) and (Sym.NodeKind = nkMethod) and (TMethod(Sym).MethodKind = mkConstructor) and
+      IsSelf(L) and IsSameBranch(Fun.Parent, Sym.Parent);
   end;
 
-  function IsCallDtorInDtor(L: TBaseOp; Fun: TFunction; Sym: TSymbol): Boolean;
+  function IsCallDtorInDtor(L: TBaseOp; Fun: TFunction; Sym: TSymbol): boolean;
   begin
-    Result := (Fun.NodeKind = nkMethod)
-        and (TMethod(Fun).MethodKind = mkDestructor)
-        and (Sym <> nil)
-        and (Sym.NodeKind = nkMethod)
-        and (TMethod(Sym).MethodKind = mkDestructor)
-        and IsSelf(L)
-        and IsSameBranch(Fun.Parent, Sym.Parent);
+    Result := (Fun.NodeKind = nkMethod) and (TMethod(Fun).MethodKind = mkDestructor) and
+      (Sym <> nil) and (Sym.NodeKind = nkMethod) and (TMethod(Sym).MethodKind = mkDestructor) and
+      IsSelf(L) and IsSameBranch(Fun.Parent, Sym.Parent);
   end;
 
 var
   Sym: TSymbol;
-  I, ParamCount: Integer;
+  I, ParamCount: integer;
   LParams: TFuncParamList;
   LParam: TFuncParam;
   LRetType: TType;
   CallArgs: TListOp;
   Op: TBaseOp;
   V: TVariable;
-  IsSafecall: Boolean;
+  IsSafecall: boolean;
   Cmd: TCmd;
 begin
   Sym := CallOp.Left.GetReference;
   if (Sym = nil) or (sym.NodeKind = nkVariable) then
   begin
-    if not CallOp.Left.Typ.IsProcedural then Err('EmitCallOp: not procedural');
-
+    if not CallOp.Left.Typ.IsProcedural then
+      Err('EmitCallOp: not procedural');
     with TProceduralType(CallOp.Left.Typ) do
     begin
       IsSafecall := CallConvention = ccSafecall;
@@ -817,75 +686,62 @@ begin
     Result := nil;
     Exit;
   end;
-
   if LParams = nil then
-    ParamCount := 0 else
-      ParamCount := LParams.Count;
-
+    ParamCount := 0
+  else
+    ParamCount := LParams.Count;
   CallArgs := TListOp(CallOp.Right);
-  for I := 0 to ParamCount - 1 do
+  for
+    I := 0 to ParamCount - 1 do
   begin
     LParam := LParams[i];
     if I >= CallArgs.Count then
       Op := nil
     else
       Op := CallArgs.Items[I];
-    // to Variant, String, Intf, dynarray
     if Op <> nil then
     begin
       case LParam.ParamType.TypeCode of
-        typVariant:
-          if Op.Typ.TypeCode <> typVariant then
+        typVariant: if Op.Typ.TypeCode <> typVariant then
           begin
             Op := EmitCastToVar(Op, TVariantType(LParam.ParamType).IsOle);
             CallArgs.Replace(I, Op);
           end;
-        typString:
-          if not Op.Typ.Equals(LParam.ParamType) then
+        typString: if not Op.Typ.Equals(LParam.ParamType) then
           begin
             Op := EmitCastToStr(Op, TStringType(LParam.ParamType));
             CallArgs.Replace(I, Op);
           end;
-        typDynamicArray:
-          if Op.Typ.TypeCode <> typDynamicArray then
+        typDynamicArray: if Op.Typ.TypeCode <> typDynamicArray then
           begin
             Op := EmitCastToDynArray(Op, Op.Typ);
             CallArgs.Replace(I, Op);
           end;
-        typInterface:
-          if not Op.Typ.Equals(LParam.ParamType) then
+        typInterface: if not Op.Typ.Equals(LParam.ParamType) then
           begin
             Assert(False, 'Need impl');
-          //  Op := EmitCastToIntf(Op, LParam.ParamType);
           end;
       end;
     end;
   end;
-
-  if LRetType <> nil then LRetType := LRetType.NormalType;
-
+  if LRetType <> nil then
+    LRetType := LRetType.NormalType;
   if LRetType = nil then
     CallOp.Typ := FContext.FUntype
   else
     CallOp.Typ := LRetType;
-
-  // 检查 ctor 中调用另一个 ctor
   if IsCallCtorInCtor(CallOp.Left, FFunc, Sym) then
   begin
     Include(CallOp.Attr, oprCtorInner);
   end;
-
   if IsCallDtorInDtor(CallOp.Left, FFunc, Sym) then
   begin
     Include(CallOp.Attr, oprDtorInner);
   end;
-
   Result := CallOp;
   if Assigned(LRetType) and (IsSpecialType(LRetType) or IsSafecall) then
   begin
     CallOp.OpCode := opcCallSpecial;
-
-    // 添加返回参数
     V := nil;
     if AsgOp = nil then
     begin
@@ -894,12 +750,10 @@ begin
     end
     else
       CallArgs.Add(AsgOp);
-
     CallOp.Detach;
     Cmd := CreateCmd(TCallCmd, CallOp.Coord);
     TCallCmd(Cmd).CallOp := CallOp;
     AddCmd(Cmd);
-
     if V <> nil then
       Result := CreateSymbolOp(V, CallArgs.Coord)
     else
@@ -911,10 +765,6 @@ procedure TCodePack.EmitCallSpecial(E: TBinaryExpr; AsgOp: TBaseOp);
 begin
   Assert(E.OpCode = opCALL);
   EmitExpr_Call(E, AsgOp);
-{  newE := CreateBinaryOpFrom(E);
-  newE.Left := EmitExpr(E.Left);
-  newE.Right := EmitExpr(E.Right);
-  EmitExpr_Call2(newE, AsgOp);}
 end;
 
 procedure TCodePack.EmitCastToDynArray(E, Dest: TBaseOp);
@@ -938,45 +788,25 @@ end;
 
 procedure TCodePack.EmitCastToStr(E, Dest: TBaseOp; typ: TStringType);
 const
-//                   Source,       Dest
-  strCastMaps: array[TStringKind, TStringKind] of TSystemRoutine = (
-//           strAnsi,          strWide,         strUnicode,      strAShort,      strWShort
-{strAnsi}    (srTrunc,         srWStrFromAStr,  srUStrFromAStr,  srSStrFromAStr, srRound),
-{strWide}    (srAStrFromWStr,  srTrunc,         srUStrFromWStr,  srSStrFromWStr, srRound),
-{strUnicode} (srAStrFromUStr,  srWStrFromUStr,  srTrunc,         srSStrFromUStr, srRound),
-{strAShort}  (srAStrFromSStr,  srWStrFromSStr,  srUStrFromSStr,  srSStrAsg,      srRound),
-{strWShort}  (srRound,         srRound,         srRound,         srRound,        srRound)
-  );
-  paCastMaps: array[TStringKind] of TSystemRoutine = (
-  // strAnsi,       strWide,        strUnicode,     strAShort,      strWShort
-    srAStrFromPACh, srWStrFromPACh, srUStrFromPACh, srSStrFromPACh, srRound
-  );
-  pwCastMaps: array[TStringKind] of TSystemRoutine = (
-  // strAnsi,       strWide,        strUnicode,     strAShort,      strWShort
-    srAStrFromPWCh, srWStrFromPWCh, srUStrFromPWCh, srSStrFromPWCh, srRound
-  );
-  aarrCastMaps: array[TStringKind] of TSystemRoutine = (
-  // strAnsi,         strWide,          strUnicode,      strAShort,        strWShort
-    srAStrFromAArray, srWStrFromAArray, srUStrFromAArray, srSStrFromAArray, srRound
-  );
-  warrCastMaps: array[TStringKind] of TSystemRoutine = (
-  // strAnsi,         strWide,          strUnicode,      strAShort,        strWShort
-    srAStrFromWArray, srWStrFromWArray, srUStrFromWArray, srSStrFromWArray, srRound
-  );
-  achrCastMaps: array[TStringKind] of TSystemRoutine = (
-  // strAnsi,      strWide,       strUnicode,    strAShort,     strWShort
-    srAStrFromACh, srWStrFromACh, srUStrFromACh, srSStrFromACh, srRound
-  );
-  wchrCastMaps: array[TStringKind] of TSystemRoutine = (
-  // strAnsi,      strWide,       strUnicode,    strAShort,     strWShort
-    srAStrFromWCh, srWStrFromWCh, srUStrFromWCh, srSStrFromWCh, srRound
-  );
-  varCastMaps: array[TStringKind] of TSystemRoutine = (
-  // strAnsi,   strWide,    strUnicode, strAShort,  strWShort
-    srVar2AStr, srVar2WStr, srVar2UStr, srVar2SStr, srRound
-  );
-  CastableTypes = [typString, typVariant, typPAnsiChar, typPWideChar,
-                         typChar];
+  strCastMaps: array[TStringKind, TStringKind] of TSystemRoutine =
+    ((srTrunc, srWStrFromAStr, srUStrFromAStr, srSStrFromAStr, srRound), (srAStrFromWStr, srTrunc,
+    srUStrFromWStr, srSStrFromWStr, srRound), (srAStrFromUStr, srWStrFromUStr, srTrunc, srSStrFromUStr, srRound),
+    (srAStrFromSStr, srWStrFromSStr, srUStrFromSStr, srSStrAsg, srRound), (srRound, srRound,
+    srRound, srRound, srRound));
+  paCastMaps: array[TStringKind] of TSystemRoutine =
+    (srAStrFromPACh, srWStrFromPACh, srUStrFromPACh, srSStrFromPACh, srRound);
+  pwCastMaps: array[TStringKind] of TSystemRoutine =
+    (srAStrFromPWCh, srWStrFromPWCh, srUStrFromPWCh, srSStrFromPWCh, srRound);
+  aarrCastMaps: array[TStringKind] of TSystemRoutine =
+    (srAStrFromAArray, srWStrFromAArray, srUStrFromAArray, srSStrFromAArray, srRound);
+  warrCastMaps: array[TStringKind] of TSystemRoutine =
+    (srAStrFromWArray, srWStrFromWArray, srUStrFromWArray, srSStrFromWArray, srRound);
+  achrCastMaps: array[TStringKind] of TSystemRoutine =
+    (srAStrFromACh, srWStrFromACh, srUStrFromACh, srSStrFromACh, srRound);
+  wchrCastMaps: array[TStringKind] of TSystemRoutine =
+    (srAStrFromWCh, srWStrFromWCh, srUStrFromWCh, srSStrFromWCh, srRound);
+  varCastMaps: array[TStringKind] of TSystemRoutine = (srVar2AStr, srVar2WStr, srVar2UStr, srVar2SStr, srRound);
+  CastableTypes = [typString, typVariant, typPAnsiChar, typPWideChar, typChar];
 var
   Inst: TCallCmd;
   Func: TFunctionDecl;
@@ -985,79 +815,62 @@ var
 begin
   if typ.TypeCode <> typString then
     Err('EmitCastToStr: Invalid typ');
-
-  if E.Typ.Equals(typ) then Exit;
-
+  if E.Typ.Equals(typ) then
+    Exit;
   if not (E.Typ.TypeCode in CastableTypes) and not E.Typ.IsPackedString then
     Err('EmitCastToStr: Invalid typ of E');
-
   if Dest.Typ.TypeCode <> typString then
     Err('EmitCastToStr: Invalid Dest type');
   if TStringType(Dest.Typ).Kind <> typ.Kind then
     Err('EmitCastToStr: Dest.Typ <> typ');
-
   case E.Typ.TypeCode of
-    typString:
-      Routine := strCastMaps[TStringType(E.Typ).Kind, typ.Kind];
-    typVariant:
-      Routine := varCastMaps[typ.Kind];
-    typPAnsiChar:
-      Routine := paCastMaps[typ.Kind];
-    typPWideChar:
-      Routine := pwCastMaps[typ.Kind];
-    typArray:
-      if E.Typ.IsPackedStringAnsi then
+    typString: Routine := strCastMaps[TStringType(E.Typ).Kind, typ.Kind];
+    typVariant: Routine := varCastMaps[typ.Kind];
+    typPAnsiChar: Routine := paCastMaps[typ.Kind];
+    typPWideChar: Routine := pwCastMaps[typ.Kind];
+    typArray: if E.Typ.IsPackedStringAnsi then
         Routine := aarrCastMaps[typ.Kind]
       else
         Routine := warrCastMaps[typ.Kind];
-    typChar:
-      if TCharType(E.Typ).Kind = charAnsi then
+    typChar: if TCharType(E.Typ).Kind = charAnsi then
         Routine := achrCastMaps[typ.Kind]
       else
         Routine := wchrCastMaps[typ.Kind];
-  else
-    Routine := srRound;
+    else
+      Routine := srRound;
   end;
-
   if Routine = srRound then
     Err('EmitCastToStr: Invalid dest string type');
-
-  Arg1 := nil; Arg2 := nil; Arg3 := nil; Arg4 := nil;
+  Arg1 := nil;
+  Arg2 := nil;
+  Arg3 := nil;
+  Arg4 := nil;
   case E.Typ.TypeCode of
-    typString, typPAnsiChar, typPWideChar, typChar:
-      if (typ.Kind = strAShort) then
+    typString, typPAnsiChar, typPWideChar, typChar: if (typ.Kind = strAShort) then
       begin
-        // procedure _SStrAsg(var Dest: ShortString; MaxChars: Integer; const Source: ShortString);
-        // procedure _SStrFromXXX(var Dest: ShortString; MaxChars: Integer; const Source: ShortString);
         Arg1 := Dest;
         Arg2 := CreateConstOp(E.Coord, typ.CharCount);
         Arg3 := E;
       end
       else
       begin
-        // XXXFromYYY(var Dest: XXX; const Source: YYY);
         Arg1 := Dest;
         Arg2 := E;
       end;
     typVariant:
       if typ.Kind = strAShort then
       begin
-        // procedure _Var2SStr(const V: TVarData; var Dest: ShortString; MaxChars: Integer);
         Arg1 := E;
         Arg2 := Dest;
         Arg3 := CreateConstOp(E.Coord, typ.CharCount);
       end
       else
       begin
-        // procedure _Var2xxx(const V: TVarData; var Dest: xxx);
         Arg1 := E;
         Arg2 := Dest;
       end;
-    typArray:
-      if typ.Kind = strAShort then
+    typArray: if typ.Kind = strAShort then
       begin
-//procedure _SStrFromAArray(var Dest: ShortString; MaxChars: Integer; Buf: PAnsiChar; Count: Integer);
-//procedure _SStrFromWArray(var Dest: ShortString; MaxChars: Integer; Buf: PWideChar; Count: Integer);
         Arg1 := Dest;
         Arg2 := CreateConstOp(E.Coord, typ.CharCount);
         Arg3 := E;
@@ -1065,14 +878,12 @@ begin
       end
       else
       begin
-// procedure _XXXFromAArray(var Dest: UnicodeString; Buf: PAnsiChar; Count: Integer);
-// procedure _UStrFromWArray(var Dest: UnicodeString; Buf: PWideChar; Count: Integer);
         Arg1 := Dest;
         Arg2 := E;
-        Arg3 := CreateConstOp(E.Coord, TArrayType(E.Typ).ElementCount);
+        Arg3 :=
+          CreateConstOp(E.Coord, TArrayType(E.Typ).ElementCount);
       end;
   end;
-
   Func := FContext.GetSystemRoutine(Routine);
   Inst := TCallCmd(CreateCmd(TCallCmd, E.Coord));
   if Arg4 <> nil then
@@ -1090,14 +901,13 @@ var
 
   function CastStrConst(C: TConstant): TSymbolOp;
   begin
-    C := AddStrConst(ValToStr(C.Value), typ);
+    C :=
+      AddStrConst(ValToStr(C.Value), typ);
     Result := CreateSymbolOp(C, E.Coord);
   end;
 
 begin
-  if (E.OpCode = opcSymbol)
-    and (TSymbolOp(E).Reference <> nil)
-    and (TSymbolOp(E).Reference.NodeKind = nkConstant) then
+  if (E.OpCode = opcSymbol) and (TSymbolOp(E).Reference <> nil) and (TSymbolOp(E).Reference.NodeKind = nkConstant) then
   begin
     Result := CastStrConst(TConstant(TSymbolOp(E).Reference));
     Exit;
@@ -1107,18 +917,13 @@ begin
   EmitCastToStr(E, S, typ);
 end;
 
-procedure TCodePack.EmitCastToVar(E, Dest: TBaseOp; ToOle: Boolean);
-
+procedure TCodePack.EmitCastToVar(E, Dest: TBaseOp; ToOle: boolean);
 const
   RoutineFromInt: array[TIntKind] of TSystemRoutine =
-  (
-    srVarFromShortint, srVarFromByte, srVarFromSmallint, srVarFromWord,
-    srVarFromLongint, srVarFromLongWord, srVarFromInt64, srVarFromUInt64
-  );
+    (srVarFromShortint, srVarFromByte, srVarFromSmallint, srVarFromWord, srVarFromLongint,
+    srVarFromLongWord, srVarFromInt64, srVarFromUInt64);
   RoutineFromStr: array[TStringKind] of TSystemRoutine =
-  (
-    srVarFromAStr, srVarFromWStr, srVarFromUStr, srVarFromSStr, srVarFromSWStr
-  );
+    (srVarFromAStr, srVarFromWStr, srVarFromUStr, srVarFromSStr, srVarFromSWStr);
 var
   Inst: TCallCmd;
   CastFunc: TFunctionDecl;
@@ -1131,40 +936,28 @@ begin
       Exit;
     end;
   end;
-
   if Dest.Typ.TypeCode <> typVariant then
     Err('EmitCastToVar: Invalid Dest type');
-
   Inst := TCallCmd(CreateCmd(TCallCmd, E.Coord));
-
   case E.Typ.TypeCode of
-    typInt:
-      Routine := RoutineFromInt[TIntType(E.Typ).Kind];
-    typNumeric:
-      Routine := srVarFromReal;
-    typBool:
-      Routine := srVarFromBool;
-    typChar:
-      if TCharType(E.Typ).Kind = charAnsi then
+    typInt: Routine := RoutineFromInt[TIntType(E.Typ).Kind];
+    typNumeric: Routine := srVarFromReal;
+    typBool: Routine := srVarFromBool;
+    typChar: if TCharType(E.Typ).Kind = charAnsi then
         Routine := srVarFromAChr
       else
         Routine := srVarFromWChr;
-    typPAnsiChar:
-      Routine := srVarFromPAChr;
-    typPWideChar:
-      Routine := srVarFromPWChr;
-    typString:
-      Routine := RoutineFromStr[TStringType(E.Typ).Kind];
-    typVariant:  // 这时E.Typ的IsOle=False，前面已经检查过
-      Routine := srOleVarFromVar;
-    typDynamicArray:
-      Routine := srVarFromDynArr;
-  else
-    Exit;
+    typPAnsiChar: Routine := srVarFromPAChr;
+    typPWideChar: Routine := srVarFromPWChr;
+    typString: Routine := RoutineFromStr[TStringType(E.Typ).Kind];
+    typVariant: Routine := srOleVarFromVar;
+    typDynamicArray: Routine := srVarFromDynArr;
+    else
+      Exit;
   end;
-
   if ToOle then
-    case Routine of
+    case Routine
+      of
       srVarFromPAChr: Routine := srOleVarFromPAChr;
       srVarFromPWChr: Routine := srOleVarFromPWChr;
       srVarFromAStr: Routine := srOleVarFromAStr;
@@ -1172,13 +965,12 @@ begin
       srVarFromUStr: Routine := srOleVarFromUStr;
       srVarFromSStr: Routine := srOleVarFromSStr;
     end;
-
   CastFunc := fContext.GetSystemRoutine(Routine);
   Inst.CallOp := CreateCall(CastFunc, E.Coord, [Dest, E]);
   AddCmd(Inst);
 end;
 
-function TCodePack.EmitCastToVar(E: TBaseOp; ToOle: Boolean): TSymbolOp;
+function TCodePack.EmitCastToVar(E: TBaseOp; ToOle: boolean): TSymbolOp;
 var
   V: TVariable;
   S: TSymbolOp;
@@ -1197,7 +989,7 @@ function TCodePack.EmitExpr(E: TExpr): TBaseOp;
   procedure CopyList(E: TListExpr; List: TListOp);
   var
     N: TBaseOp;
-    I: Integer;
+    I: integer;
   begin
     List.SetCapacity(E.Count);
     for I := 0 to E.Count - 1 do
@@ -1221,12 +1013,11 @@ function TCodePack.EmitExpr(E: TExpr): TBaseOp;
   end;
 
 var
-  Old: Integer;
+  Old: integer;
 begin
   Old := FCurCode.Cmds.Count;
   case E.OpCode of
-    opNE..opGE:
-      if eaStrOp in E.Attr then
+    opNE..opGE: if eaStrOp in E.Attr then
         Result := EmitExpr_StrCmp(TBinaryExpr(E))
       else if eaVarOp in E.Attr then
         Result := EmitExpr_VarCmp(TBinaryExpr(E))
@@ -1237,10 +1028,7 @@ begin
     opIN: Result := EmitExpr_In(TBinaryExpr(E));
     opIS: Result := EmitExpr_Is(TBinaryExpr(E));
     opAS: Result := EmitExpr_As(TBinaryExpr(E));
-
-    opADD, opSUB, opOR, opXOR, opMUL, opFDIV,
-    opIDIV, opMOD, opAND, opSHL, opSHR:
-      if eaStrOp in E.Attr then
+    opADD, opSUB, opOR, opXOR, opMUL, opFDIV, opIDIV, opMOD, opAND, opSHL, opSHR: if eaStrOp in E.Attr then
         Result := EmitExpr_StrAdd(TBinaryExpr(E))
       else if eaVarOp in E.Attr then
         Result := EmitExpr_VarOp(TBinaryExpr(E))
@@ -1248,63 +1036,46 @@ begin
         Result := EmitExpr_SetOp(TBinaryExpr(E))
       else
         Result := EmitExpr_Bin(TBinaryExpr(E));
-
-    opMEMBER:
-      Result := EmitExpr_Member(TBinaryExpr(E));
-    opCAST:
-      if E.Typ.TypeCode = typVariant then
+    opMEMBER: Result := EmitExpr_Member(TBinaryExpr(E));
+    opCAST: if E.Typ.TypeCode = typVariant then
         Result := Self.EmitCastToVar(EmitExpr(TBinaryExpr(E).Right), TVariantType(E.Typ).IsOle)
       else
         Result := EmitExpr_Bin(TBinaryExpr(E));
-
     opCALL: Result := EmitExpr_Call(TBinaryExpr(E));
-
-    opINDEX:
-      if eaArrayProp in E.Attr then
+    opINDEX: if eaArrayProp in E.Attr then
       begin
         Result := EmitExpr(TBinaryExpr(E).Left);
         Assert(Result.OpCode = opcCALL);
         Assert(TBinaryExpr(E).Right <> nil);
-        CopyList(TListExpr(TBinaryExpr(E).Right),
-                  TListOp(TBinaryOp(Result).Right));
+        CopyList(TListExpr(TBinaryExpr(E).Right), TListOp(TBinaryOp(Result).Right));
         Result := EmitCallOp(TBinaryOp(Result));
       end
       else if eaVarOp in E.Attr then
         Result := EmitExpr_VarArrGet(TBinaryExpr(E))
       else
         Result := EmitExpr_Bin(TBinaryExpr(E));
-    opNOT, opNEG:
-      if eaVarOp in E.Attr then
+    opNOT, opNEG: if eaVarOp in E.Attr then
         Result := EmitExpr_UnaryVarOp(TUnaryExpr(E))
       else
         Result := EmitExpr_Un(TUnaryExpr(E));
-
     opPOS: Result := EmitExpr(E);
-    //opINHERITED: Result := EmitExpr_Call(TBinaryExpr(E));
     opSET: Result := EmitExpr_Set(TUnaryExpr(E));
-    opADDR:
-      if TUnaryExpr(E).Operand.IsFunction then
-//      if E.Typ.TypeCode = typProcedural then
-      // todo 1: 有问题，类型有可能是pointer
-      // 解决方法：在ExprAttr中增加一个标志，指示这个Expr取函数指针
+    opADDR: if TUnaryExpr(E).Operand.IsFunction then
         Result := EmitExpr_ProcAddr(TUnaryExpr(E))
       else
         Result := EmitExpr_Un(TUnaryExpr(E));
-
-    opINST: Result := EmitExpr_Un(TUnaryExpr(E));
-
-    opNIL, opCONST:
-      Result := Self.EmitExpr_Const(TConstExpr(E));
-
+    opINST:
+      Result := EmitExpr_Un(TUnaryExpr(E));
+    opNIL, opCONST: Result := Self.EmitExpr_Const(TConstExpr(E));
     opSYMBOL: Result := Self.EmitExpr_Symbol(TSymbolExpr(E));
     opLIST:
-      begin
-        Result := CreateListOpFrom(E);
-        CopyList(TListExpr(E), TListOp(Result));
-      end
-  else
-    Assert(False);
-    Result := nil;
+    begin
+      Result := CreateListOpFrom(E);
+      CopyList(TListExpr(E), TListOp(Result));
+    end
+    else
+      Assert(False);
+      Result := nil;
   end;
   AttachStmt(Result, Old);
 end;
@@ -1318,65 +1089,52 @@ begin
     if E.Right.Typ.TypeCode = typInterface then
     begin
       Fun := FContext.GetSystemRoutine(srIntfCast);
-      //Result := CreateCall(Fun, E.Coord, [EmitExpr(E.Left), EmitExpr(E.Right)
     end;
   end;
   Fun := FContext.GetSystemRoutine(srAsClass);
   Result := CreateCall(Fun, E.Coord, [EmitExpr(E.Left), EmitExpr(E.Right)]);
-  //Result.Typ := E.Typ;
 end;
 
-function TCodePack.EmitExpr_Builtin(E: TBinaryExpr; Sym: TBuiltinFunction
-  ): TBaseOp;
+function TCodePack.EmitExpr_Builtin(E: TBinaryExpr; Sym: TBuiltinFunction): TBaseOp;
 
   procedure EmitExit;
   var
-    I: Integer;
+    I: integer;
     S: TCmd;
   begin
-    // 退出之前执行finally块代码
     for I := FCleanupStack.Count - 1 downto 0 do
     begin
       EmitCallCmd(TFunction(FCleanupStack[I]), E.Coord, []);
     end;
-
-    // 退出之前执行异常终止指令
     for I := 0 to FExceptCount - 1 do
     begin
       S := CreateCmd(TEndExceptCmd, E.Coord);
-      // 退出之前释放 exobj
       Assert(I < FExceptVarStack.Count, 'FExceptVarStack');
       TEndExceptCmd(S).ExceptVar := TVariable(FExceptVarStack[I]).Name;
       AddCmd(S);
     end;
-
-    // 带参数的Exit
     if TListExpr(E.Right).Count > 0 then
     begin
       S := CreateCmd(TAssignCmd, E.Coord);
       TAssignCmd(S).Left := CreateSymbolOp(FResultSym, E.Coord);
-    //  TListOp(E.Right).Delete(0);
       TAssignCmd(S).Right := EmitExpr(TListExpr(E.Right).Items[0]);
       AddCmd(S);
     end;
-
     EmitGotoCmd(FQuitLabel, E.Coord);
   end;
 
   procedure EmitContinue;
   var
-    I: Integer;
+    I: integer;
     S: TCmd;
   begin
     for I := FCleanupStack.Count - 1 downto FCleanupIndex do
     begin
       EmitCallCmd(TFunction(FCleanupStack[I]), E.Coord, []);
     end;
-    // 退出之前执行异常终止指令
     for I := 0 to FExceptCount - 1 do
     begin
       S := CreateCmd(TEndExceptCmd, E.Coord);
-      // 退出之前释放 exobj
       Assert(I < FExceptVarStack.Count, 'FExceptVarStack');
       TEndExceptCmd(S).ExceptVar := TVariable(FExceptVarStack[I]).Name;
       AddCmd(S);
@@ -1386,18 +1144,16 @@ function TCodePack.EmitExpr_Builtin(E: TBinaryExpr; Sym: TBuiltinFunction
 
   procedure EmitBreak;
   var
-    I: Integer;
+    I: integer;
     S: TCmd;
   begin
     for I := FCleanupStack.Count - 1 downto FCleanupIndex do
     begin
       EmitCallCmd(TFunction(FCleanupStack[I]), E.Coord, []);
     end;
-    // 退出之前执行异常终止指令
     for I := 0 to FExceptCount - 1 do
     begin
       S := CreateCmd(TEndExceptCmd, E.Coord);
-      // 退出之前释放 exobj
       Assert(I < FExceptVarStack.Count, 'FExceptVarStack');
       TEndExceptCmd(S).ExceptVar := TVariable(FExceptVarStack[I]).Name;
       AddCmd(S);
@@ -1408,9 +1164,10 @@ function TCodePack.EmitExpr_Builtin(E: TBinaryExpr; Sym: TBuiltinFunction
   function EmitAssigned: TBinaryOp;
   begin
     Result := CreateBinaryOp(opcEQ, E.Coord);
-    Assert(E.Right.OpCode=opLIST);
+    Assert(E.Right.OpCode = opLIST);
     Result.Left := EmitExpr(TListExpr(E.Right).Items[0]);
-    Result.Right := CreateConstOp(Result.Left.Coord);
+    Result.Right :=
+      CreateConstOp(Result.Left.Coord);
     Result.Right.OpCode := opcNIL;
     Result.Right.Typ := FContext.FPointerType;
     Result.Typ := FContext.FBooleanType;
@@ -1421,23 +1178,20 @@ function TCodePack.EmitExpr_Builtin(E: TBinaryExpr; Sym: TBuiltinFunction
     Assert(TListExpr(E.Right).Count > 0, 'EmitSizeOf');
     Result := CreateConstOp(E.Coord, TListExpr(E.Right).Items[0].Typ.Size);
   end;
+
 begin
   Result := nil;
   case Sym.Kind of
     bfAssigned: Result := EmitAssigned;
-
     bfExit: EmitExit;
-
     bfContinue: EmitContinue;
-
     bfBreak: EmitBreak;
-
     bfSizeOf: EmitSizeOf;
-  else
-    Result := CreateBinaryOp(opcCallBuiltin, E.Coord);
-    TBinaryOp(Result).Left := EmitExpr(E.Left);
-    TBinaryOp(Result).Right := EmitExpr(E.Right);
-    TBinaryOp(Result).Typ := E.Typ;
+    else
+      Result := CreateBinaryOp(opcCallBuiltin, E.Coord);
+      TBinaryOp(Result).Left := EmitExpr(E.Left);
+      TBinaryOp(Result).Right := EmitExpr(E.Right);
+      TBinaryOp(Result).Typ := E.Typ;
   end;
 end;
 
@@ -1445,22 +1199,20 @@ function TCodePack.EmitExpr_Call(E: TBinaryExpr; AsgOp: TBaseOp): TBaseOp;
 var
   Sym: TSymbol;
 begin
-  // 添加Sepcial参数到末尾。
   Sym := E.Left.GetReference;
   if (Sym <> nil) and (Sym.NodeKind = nkBuiltinFunc) then
   begin
     Result := EmitExpr_Builtin(E, TBuiltinFunction(Sym));
     Exit;
   end;
-
   Result := CreateBinaryOp(opcCALL, E.Coord);
   Result.Switches := E.Switches;
-  CopyAttr(Result, E);
+  CopyAttr(
+    Result, E);
   if (E.Left.OpCode = opSymbol) and (eaInherited in E.Left.Attr) then
     Include(Result.Attr, oprInherited);
   TBinaryOp(Result).Left := EmitExpr(E.Left);
   TBinaryOp(Result).Right := EmitExpr(E.Right);
-
   Result := EmitCallOp(TBinaryOp(Result), AsgOp);
 end;
 
@@ -1471,53 +1223,25 @@ var
 begin
   case E.Value.VT of
     vtStr, vtWStr:
-      begin
-        s := ValToStr(E.Value);
-        C := AddStrConst(s, E.Typ);
-        Result := CreateSymbolOp(C, E.Coord);
-      end;
-    // 不会出现vtSet
-    //vtSet:
-  else
-    Result := CreateConstOpFrom(E);
+    begin
+      s := ValToStr(E.Value);
+      C := AddStrConst(s, E.Typ);
+      Result := CreateSymbolOp(C, E.Coord);
+    end;
+    else
+      Result := CreateConstOpFrom(E);
   end;
 end;
 
 function TCodePack.EmitExpr_In(E: TBinaryExpr): TBaseOp;
-
-  {function EmitBuildSet(List: TListExpr): TBaseOp;
-  var
-    i: Integer;
-    Op: TBaseOp;
-    Elem: TExpr;
-    IsConst: Boolean;
-    MaxEl, MinEl: Byte;
-  begin
-    for i := 0 to List.Count-1 do
-    begin
-      Elem := List.Items[i];
-      if not (eaConst in Elem.Attr) then
-      begin
-        IsConst := False;
-        Break;
-      end;
-    end;
-
-    if IsConst then
-    begin
-
-    end;
-  end;  }
 var
   RT: TType;
   V: TValueRec;
   Op1, Op2, Op3: TBaseOp;
   Fun: TFunctionDecl;
 begin
-
   RT := E.Right.Typ;
   Assert(RT.TypeCode = typSet);
-
   if E.Right.OpCode = opSET then
   begin
     if TListExpr(TUnaryExpr(E.Right).Operand).Count = 0 then
@@ -1527,8 +1251,6 @@ begin
       Result := CreateConstOp(E.Coord, V);
       Exit;
     end;
-
-    //Op2 := EmitBuildSet(TListExpr(E.Right));
     Op2 := EmitExpr(E.Right);
   end
   else
@@ -1536,7 +1258,6 @@ begin
   Op1 := EmitExpr(E.Left);
   Op3 := CreateConstOp(E.Coord, Op2.Typ.Size);
   Fun := FContext.GetSystemRoutine(srSetIn);
-  // function _SetIn(var S; Size, Elem: Byte): Boolean;
   Result := CreateCall(Fun, E.Coord, [Op2, Op3, Op1]);
 end;
 
@@ -1546,7 +1267,6 @@ var
 begin
   Fun := FContext.GetSystemRoutine(srIsClass);
   Result := CreateCall(Fun, E.Coord, [EmitExpr(E.Left), EmitExpr(E.Right)]);
-  //Result.Typ := E.Typ;
 end;
 
 function TCodePack.EmitExpr_Member(E: TBinaryExpr): TBaseOp;
@@ -1556,73 +1276,44 @@ begin
   case E.Left.OpCode of
     opMEMBER: L := EmitExpr_Member(TBinaryExpr(E.Left));
     opSYMBOL: L := EmitExpr_Symbol(TSymbolExpr(E.Left));
-  else
-    L := EmitExpr(E.Left);
+    else
+      L := EmitExpr(E.Left);
   end;
-
   Assert(E.Right.OpCode = opSYMBOL, 'EmitExpr_Member: Right is not symbol');
-
   R := EmitExpr_Symbol(TSymbolExpr(E.Right));
   case R.OpCode of
     opcSYMBOL:
-      begin
-        Result := CreateBinaryOpFrom(E);
-        TBinaryOp(Result).Left := L;
-        TBinaryOp(Result).Right := R;
-      end;
+    begin
+      Result := CreateBinaryOpFrom(E);
+      TBinaryOp(Result).Left := L;
+      TBinaryOp(Result).Right := R;
+    end;
     opcCALL:
-      begin
-        //Result := R;
-        // 这时不可能有多级访问方法调用的，而且也不会在右边添加Self
-        Assert(TBinaryOp(R).Left.OpCode = opcSYMBOL);
-{
-     *
-    / \
-   a   opcCall
-       /\
-      b  args
-
-      ==>
-           opcCall
-           / \
-          *   args
-         / \
-        a   b
-}
-        Result := CreateBinaryOp(opcMEMBER, E.Coord);
-        Result.Typ := TBinaryOp(R).Left.Typ;
-        TBinaryOp(Result).Left := L;
-        TBinaryOp(Result).Right := TBinaryOp(R).Left;
-        TBinaryOp(R).Left := Result;
-        Result := R;
-      end;
+    begin
+      Assert(TBinaryOp(R).Left.OpCode = opcSYMBOL);
+      Result := CreateBinaryOp(opcMEMBER, E.Coord);
+      Result.Typ := TBinaryOp(R).Left.Typ;
+      TBinaryOp(Result).Left := L;
+      TBinaryOp(Result).Right := TBinaryOp(R).Left;
+      TBinaryOp(R).Left := Result;
+      Result := R;
+    end;
     opcMEMBER:
-      begin
-        Leaf := R;
-        while TBinaryOp(Leaf).Left.OpCode = opcMEMBER do
-          Leaf := TBinaryOp(Leaf).Left;
-        // 返回opMember只能是多级访问器，所以此处必定是符号
-        Assert(TBinaryOp(Leaf).Left.OpCode = opcSYMBOL);
-{    Left   Right
-      *      *         *
-     / \    / \       / \
-    a   b  c   d     *   d
-                    / \
-                   *   c
-                  / \
-                 a   b
-}
-        Result := CreateBinaryOp(opcMEMBER, E.Coord);
-        Result.Typ := TBinaryOp(Leaf).Left.Typ;
-        TBinaryOp(Result).Left := L;
-        TBinaryOp(Result).Right := TBinaryOp(Leaf).Left;
-        TBinaryOp(Leaf).Left := Result;
-
-        Result := R;
-      end;
-  else
-    Assert(False);
-    Result := nil;
+    begin
+      Leaf := R;
+      while TBinaryOp(Leaf).Left.OpCode = opcMEMBER do
+        Leaf := TBinaryOp(Leaf).Left;
+      Assert(TBinaryOp(Leaf).Left.OpCode = opcSYMBOL);
+      Result := CreateBinaryOp(opcMEMBER, E.Coord);
+      Result.Typ := TBinaryOp(Leaf).Left.Typ;
+      TBinaryOp(Result).Left := L;
+      TBinaryOp(Result).Right := TBinaryOp(Leaf).Left;
+      TBinaryOp(Leaf).Left := Result;
+      Result := R;
+    end;
+    else
+      Assert(False);
+      Result := nil;
   end;
 end;
 
@@ -1638,14 +1329,15 @@ end;
 
 function TCodePack.EmitExpr_Set(E: TUnaryExpr): TBaseOp;
 
-  function GetIntConst(E: TExpr; out V: Integer): Boolean;
+  function GetIntConst(E: TExpr; out V: integer): boolean;
   var
     C: TConstant;
   begin
     Result := True;
     if (E.OpCode in [opCONST]) then
       V := ValToInt(TConstExpr(E).Value)
-    else begin
+    else
+    begin
       C := E.GetConstantSymbol;
       if C <> nil then
         V := ValToInt(C.Value)
@@ -1657,7 +1349,7 @@ function TCodePack.EmitExpr_Set(E: TUnaryExpr): TBaseOp;
   function BuildSet: TSymbolOp;
   var
     List: TListExpr;
-    i, V1, V2: Integer;
+    i, V1, V2: integer;
     Elem: TExpr;
     Op1, Op2: TBinaryOp;
     SetVal: TSetValue;
@@ -1665,7 +1357,7 @@ function TCodePack.EmitExpr_Set(E: TUnaryExpr): TBaseOp;
     localT: TSetType;
     Fun: TFunctionDecl;
     Vars: array of TExpr;
-    VarCount: Integer;
+    VarCount: integer;
 
     procedure Add(E: TExpr);
     begin
@@ -1680,7 +1372,7 @@ function TCodePack.EmitExpr_Set(E: TUnaryExpr): TBaseOp;
     SetVal := TSetValue.Create;
     VarCount := 0;
     try
-      for i := 0 to List.Count-1 do
+      for i := 0 to List.Count - 1 do
       begin
         Elem := List.Items[i];
         if GetIntConst(Elem, V1) then
@@ -1689,20 +1381,17 @@ function TCodePack.EmitExpr_Set(E: TUnaryExpr): TBaseOp;
         end
         else if Elem.OpCode = opRANGE then
         begin
-          if GetIntConst(TBinaryExpr(Elem).Left, V1)
-            and GetIntConst(TBinaryExpr(Elem).Right, V2) then
+          if GetIntConst(TBinaryExpr(Elem).Left, V1) and GetIntConst(TBinaryExpr(Elem).Right, V2) then
           begin
             SetVal.SetRange(V1, V2, True);
           end
           else
           begin
-            // Emit SetRange
             Add(Elem);
           end;
         end
         else
         begin
-          // Emit SetElem
           Add(Elem);
         end;
       end;
@@ -1710,17 +1399,13 @@ function TCodePack.EmitExpr_Set(E: TUnaryExpr): TBaseOp;
       SetVal.Free;
       raise;
     end;
-
     SetVal.Update;
     setV := AddSetConst(SetVal);
-
-    // 如果 Vars 为空，则不创建临时变量。 返回由SetVal存贮的常量。
     if VarCount = 0 then
     begin
       Result := CreateSymbolOp(setV, E.Coord);
       Exit;
     end;
-
     localT := TSetType.Create;
     localT.RangeType := TSubrangeType.Create;
     AddNode(localT);
@@ -1728,27 +1413,13 @@ function TCodePack.EmitExpr_Set(E: TUnaryExpr): TBaseOp;
     localT.RangeType.BaseType := FContext.FByteType;
     localT.RangeType.RangeBegin := 0;
     localT.RangeType.RangeEnd := 255;
-{    if SetVal.BitCount = 0 then
-    begin
-    end
-    else
-    begin
-      localT.RangeType.RangeBegin := SetVal.BitStart;
-      localT.RangeType.RangeEnd := SetVal.BitStart + SetVal.BitCount - 1;
-    end;}
     localT.Update;
     localV := AddVar(localT);
-
     Fun := FContext.GetSystemRoutine(srSetCopy);
-    EmitCallCmd(Fun, E.Coord, [
-      CreateSymbolOp(localV, E.Coord),
-      CreateSymbolOp(setV, E.Coord),
-      CreateConstOp(E.Coord, localT.LowByte),
-      CreateConstOp(E.Coord, localT.HighByte),
-      CreateConstOp(E.Coord, TSetType(SetV.VarType).LowByte),
-      CreateConstOp(E.Coord, TSetType(SetV.VarType).HighByte)
-      ]);
-
+    EmitCallCmd(Fun, E.Coord, [CreateSymbolOp(localV, E.Coord), CreateSymbolOp(setV, E.Coord),
+      CreateConstOp(E.Coord, localT.LowByte), CreateConstOp(E.Coord, localT.HighByte),
+      CreateConstOp(E.Coord, TSetType(SetV.VarType).LowByte), CreateConstOp(E.Coord,
+      TSetType(SetV.VarType).HighByte)]);
     for i := 0 to VarCount - 1 do
     begin
       if Vars[i].OpCode = opRANGE then
@@ -1758,16 +1429,11 @@ function TCodePack.EmitExpr_Set(E: TUnaryExpr): TBaseOp;
         Op1.Left := EmitExpr(TBinaryExpr(Vars[i]).Left);
         Op1.Right := CreateConstOp(E.Coord, localT.LowByte);
         Op1.Typ := FContext.FIntegerType;
-
         Op2 := CreateBinaryOp(opcSUB, E.Coord);
         Op2.Left := EmitExpr(TBinaryExpr(Vars[i]).Right);
         Op2.Right := CreateConstOp(E.Coord, localT.LowByte);
         Op2.Typ := FContext.FIntegerType;
-        EmitCallCmd(Fun, E.Coord, [
-            CreateSymbolOp(localV, E.Coord),
-            CreateConstOp(E.Coord, localT.Size),
-            Op1, Op2
-          ]);
+        EmitCallCmd(Fun, E.Coord, [CreateSymbolOp(localV, E.Coord), CreateConstOp(E.Coord, localT.Size), Op1, Op2]);
       end
       else
       begin
@@ -1776,14 +1442,9 @@ function TCodePack.EmitExpr_Set(E: TUnaryExpr): TBaseOp;
         Op1.Left := EmitExpr(Vars[i]);
         Op1.Right := CreateConstOp(E.Coord, localT.LowByte);
         Op1.Typ := FContext.FIntegerType;
-        EmitCallCmd(Fun, E.Coord, [
-            CreateSymbolOp(localV, E.Coord),
-            CreateConstOp(E.Coord, localT.Size),
-            Op1
-          ]);
+        EmitCallCmd(Fun, E.Coord, [CreateSymbolOp(localV, E.Coord), CreateConstOp(E.Coord, localT.Size), Op1]);
       end;
     end;
-
     Result := CreateSymbolOp(localV, E.Coord);
   end;
 
@@ -1791,17 +1452,17 @@ function TCodePack.EmitExpr_Set(E: TUnaryExpr): TBaseOp;
   var
     Args: array of TBaseOp;
     List: TListExpr;
-    i: Integer;
+    i: integer;
   begin
     List := TListExpr(E.Operand);
     SetLength(Args, List.Count);
-    for i := 0 to Length(Args)-1 do
+    for i := 0 to
+      Length(Args) - 1 do
       Args[i] := EmitExpr(List.Items[i]);
-    Result := EmitOAInitStmt(E.Coord,
-      TOpenArrayType(E.Typ).ElementType, Args);
+    Result := EmitOAInitStmt(E.Coord, TOpenArrayType(E.Typ).ElementType, Args);
   end;
+
 begin
-  // opSET有两种类型： TSetType 和 TOpenArrayType
   if E.Typ.TypeCode = typSET then
   begin
     Result := BuildSet;
@@ -1822,21 +1483,15 @@ function TCodePack.EmitExpr_SetOp(E: TBinaryExpr): TBaseOp;
     LV: TSymbolOp;
     LSet: TSetType;
   begin
-    // proc _SetInflate(var Dest; const Src; lo,hi,maxHi:Byte);
-
     Assert(Op.Typ.TypeCode = typSet);
     LSet := TSetType(Op.Typ);
-
     Assert(desT.HighByte >= LSet.HighByte);
     Assert(desT.LowByte <= LSet.LowByte);
-
     LV := CreateSymbolOp(AddVar(desT), Op.Coord);
     Fun := FContext.GetSystemRoutine(srSetInflate);
-    EmitCallCmd(Fun, Op.Coord, [LV, Op,
-        CreateConstOp(Op.Coord, Byte(LSet.LowByte - desT.LowByte)),
-        CreateConstOp(Op.Coord, Byte(LSet.HighByte - desT.LowByte)),
-        CreateConstOp(Op.Coord, desT.HighByte)
-      ]);
+    EmitCallCmd(
+      Fun, Op.Coord, [LV, Op, CreateConstOp(Op.Coord, byte(LSet.LowByte - desT.LowByte)),
+      CreateConstOp(Op.Coord, byte(LSet.HighByte - desT.LowByte)), CreateConstOp(Op.Coord, desT.HighByte)]);
     Result := CreateSymbolOp(LV.Reference, Op.Coord);
   end;
 
@@ -1846,32 +1501,24 @@ function TCodePack.EmitExpr_SetOp(E: TBinaryExpr): TBaseOp;
     LV: TSymbolOp;
     LSet: TSetType;
   begin
-    // proc _SetCopy(var Dest; const Src; d_lo, d_hi, s_lo, s_hi: Byte);
-
     Assert(Op.Typ.TypeCode = typSet);
     LSet := TSetType(Op.Typ);
-
     LV := CreateSymbolOp(AddVar(LSet), Op.Coord);
     Fun := FContext.GetSystemRoutine(srSetCopy);
-    EmitCallCmd(Fun, Op.Coord, [LV, Op,
-        CreateConstOp(Op.Coord, LSet.LowByte),
-        CreateConstOp(Op.Coord, LSet.HighByte),
-        CreateConstOp(Op.Coord, LSet.LowByte),
-        CreateConstOp(Op.Coord, LSet.HighByte)
-      ]);
+    EmitCallCmd(Fun, Op.Coord, [LV, Op, CreateConstOp(Op.Coord, LSet.LowByte), CreateConstOp(
+      Op.Coord, LSet.HighByte), CreateConstOp(Op.Coord, LSet.LowByte), CreateConstOp(Op.Coord, LSet.HighByte)]);
     Result := CreateSymbolOp(LV.Reference, Op.Coord);
-
   end;
 
-  function NeedExpand(LT, RT: TSetType; out ST: TSetType): Boolean;
+  function NeedExpand(LT, RT: TSetType; out ST: TSetType): boolean;
   begin
     if (LT.LowByte <> RT.LowByte) or (LT.HighByte <> RT.HighByte) or (LT.Size <> RT.Size) then
     begin
       Result := True;
-      // 如果某一方的能够完全包括另一方，扩展后的类型取较大方的，否则统一为通用类型
       if (LT.LowByte <= RT.LowByte) and (LT.HighByte >= RT.HighByte) then
         ST := LT
-      else if (RT.LowByte <= LT.LowByte) and (RT.HighByte >= LT.HighByte) then
+      else
+      if (RT.LowByte <= LT.LowByte) and (RT.HighByte >= LT.HighByte) then
         ST := RT
       else
         ST := FContext.FByteSetType;
@@ -1883,13 +1530,12 @@ function TCodePack.EmitExpr_SetOp(E: TBinaryExpr): TBaseOp;
     end;
   end;
 
-  function IsHiddenVar(Op: TBaseOp): Boolean;
+  function IsHiddenVar(Op: TBaseOp): boolean;
   var
     Ref: TSymbol;
   begin
     Ref := op.GetReference;
-    Result := (Ref <> nil) and (Ref.NodeKind = nkVariable)
-        and (vaHidden in TVariable(Ref).VarAttr);
+    Result := (Ref <> nil) and (Ref.NodeKind = nkVariable) and (vaHidden in TVariable(Ref).VarAttr);
   end;
 
 var
@@ -1898,16 +1544,12 @@ var
   DesT: TSetType;
   sr: TSystemRoutine;
 begin
-  // +, -, *, <=, >=, =, <>
   L := EmitExpr(E.Left);
   R := EmitExpr(E.Right);
-
   Assert(L.Typ.TypeCode = typSet, 'SetOp');
   Assert(R.Typ.TypeCode = typSet, 'SetOp');
-
   if NeedExpand(TSetType(L.Typ), TSetType(R.Typ), DesT) then
   begin
-    // Expand set
     if L.Typ.Size <> DesT.Size then
       L := DoExpand(L, desT);
     if R.Typ.Size <> DesT.Size then
@@ -1915,12 +1557,10 @@ begin
   end
   else
     DesT := TSetType(L.Typ);
-
   if not IsHiddenVar(L) then
   begin
     L := DoSetCopy(L);
   end;
-
   case E.OpCode of
     opADD: sr := srSetUnion;
     opSUB: sr := srSetSub;
@@ -1928,19 +1568,12 @@ begin
     opLE: sr := srSetLE;
     opGE: sr := srSetGE;
     opEQ: sr := srSetEQ;
-    opNE: sr := srSetNE;
-  else
-    Assert(False, 'SetOp');
-    sr := srTrunc;
+    opNE:
+      sr := srSetNE;
+    else
+      Assert(False, 'SetOp');
+      sr := srTrunc;
   end;
-  // proc SetUnion(var Dest; const Src; Size: Byte);
-  // proc SetSub(var Dest; const Src; Size: Byte);
-  // proc SetInterset(var Dest; const Src; Size: Byte);
-  // func SetLE(const Left, Right; Size: Byte): Boolean;
-  // func SetGE(const Left, Right; Size: Byte): Boolean;
-  // func SetEQ(const Left, Right; Size: Byte): Boolean;
-  // func SetNE(const Left, Right; Size: Byte): Boolean;
-
   Fun := FContext.GetSystemRoutine(sr);
   if E.OpCode in [opADD, opSUB, opMUL] then
   begin
@@ -1964,18 +1597,15 @@ function TCodePack.EmitExpr_StrCmp(E: TBinaryExpr): TBaseOp;
     CastOp: TBinaryOp;
   begin
     Result := CreateBinaryOpFrom(E);
-
     CastOp := CreateBinaryOp(opcCast, S.Coord);
     CastOp.Right := EmitExpr(S);
     CastOp.Left := CreateSymbolOp(FContext.FPointerType, S.Coord);
     Result.Left := CastOp;
     Result.Right := CreateConstOp(E.Coord);
     Result.Right.OpCode := opcNIL;
-//    ValFromPtr(TConstOp(Result.Right).Value, nil);
   end;
 
 begin
-  // 与空字符串比较需要特殊处理
   if E.Right.IsEmptyString then
   begin
     Result := CompareEmptyStr(E, E.Left);
@@ -1986,11 +1616,9 @@ begin
     Result := CompareEmptyStr(E, E.Right);
     Exit;
   end;
-
   Result := CreateBinaryOpFrom(E);
   TBinaryOp(Result).Left := EmitExpr(E.Left);
   TBinaryOp(Result).Right := EmitExpr(E.Right);
-
   Result := EmitStrCmp(TBinaryOp(Result));
 end;
 
@@ -1998,7 +1626,7 @@ function TCodePack.EmitExpr_Symbol(E: TSymbolExpr): TBaseOp;
 
   function CreateMultiAccessorExpr(M: TMultiAccessor; const Coord: TAstNodeCoord): TBaseOp;
   var
-    i: Integer;
+    i: integer;
     L: TBaseOp;
   begin
     Assert(M.FieldCount > 1);
@@ -2012,8 +1640,6 @@ function TCodePack.EmitExpr_Symbol(E: TSymbolExpr): TBaseOp;
     end;
   end;
 
-  // 取Ref的实例变量
-  // 如 Ref是个外围类的符号，则实例变量是外围类
   function GetInstVar(Ref: TSymbol): TSymbol;
   var
     P1, P2: TSymbol;
@@ -2024,73 +1650,58 @@ function TCodePack.EmitExpr_Symbol(E: TSymbolExpr): TBaseOp;
     Result := FSelfSym;
     if (saClass in Ref.Attr) and (P1 <> P2) then
     begin
-      // 考虑这种情况：FFunc是内围类的方法,Ref是外围类的符号，那么
-      // FFunc中可以直接访问Ref。这时需要补上
-      // 需要注意的是：P1<>P2的判断不能省，因为class方法是可以虚的
-      // 用Self来调用和用类名调用，结果不一定相同
-
-      // 确定FFunc所在的类型是否是Ref所在类型中的嵌套类型
       while Assigned(P2) do
       begin
-        if P2 = P1 then Break;
+        if P2 = P1 then
+          Break;
         P2 := P2.Parent;
       end;
-      if P2 = P1 then Result := P1;
+      if P2 = P1 then
+        Result := P1;
     end;
   end;
 
 var
   Ref, Getter: TSymbol;
-  NeedSelf: Boolean;
+  NeedSelf: boolean;
   L, Leaf, S: TBaseOp;
 begin
   Ref := TSymbolExpr(E).Reference;
-  // 假如它是saClass? 也得加Self
-  NeedSelf := (Ref.NodeKind in [nkField, nkProperty, nkIntfProperty, nkMethod])
-    and not (saStatic in Ref.Attr)
-    and ((E.Parent = nil) or (E.Parent.OpCode <> opMEMBER)
-          or (TBinaryExpr(E.Parent).Left = E)
-        );
-
-  case Ref.NodeKind of
+  NeedSelf := (Ref.NodeKind in [nkField, nkProperty, nkIntfProperty, nkMethod]) and not
+    (saStatic in Ref.Attr) and ((E.Parent = nil) or (E.Parent.OpCode <> opMEMBER) or (TBinaryExpr(E.Parent).Left = E));
+  case Ref.NodeKind
+    of
     nkProperty, nkIntfProperty:
-      begin
-        if Ref.NodeKind = nkProperty then
-          Getter := TProperty(Ref).Getter
-        else
-          Getter := TIntfProperty(Ref).Getter;
-
-        if Getter = nil then Err('EmitExpr_Symbol: Getter is nil');
-
-        case Getter.NodeKind of
-          nkField: Result := CreateSymbolOp(Getter, E.Coord);
-          nkAccessor:
-            Result := CreateMultiAccessorExpr(TMultiAccessor(Getter), E.Coord);
-          nkMethod:
-            Result := CreateSymbolOp(Getter, E.Coord);
+    begin
+      if Ref.NodeKind = nkProperty then
+        Getter := TProperty(Ref).Getter
+      else
+        Getter := TIntfProperty(Ref).Getter;
+      if Getter = nil then
+        Err('EmitExpr_Symbol: Getter is nil');
+      case Getter.NodeKind of
+        nkField: Result := CreateSymbolOp(Getter, E.Coord);
+        nkAccessor: Result := CreateMultiAccessorExpr(TMultiAccessor(Getter), E.Coord);
+        nkMethod: Result := CreateSymbolOp(Getter, E.Coord);
         else
           Assert(False, 'EmitExpr_Symbol');
           Result := nil;
-        end;
-
-        S := Result;
-        // 转为调用。
-        if Getter.NodeKind = nkMethod then
-        begin
-          Result := CreateBinaryOp(opcCALL, E.Coord);
-          Result.Typ := E.Typ;
-          TBinaryOp(Result).Left := S;
-          TBinaryOp(Result).Right := CreateListOp(E.Coord);
-        end;
       end;
-  else
-    Result := CreateSymbolOpFrom(TSymbolExpr(E));
-    S := Result;
+      S := Result;
+      if Getter.NodeKind = nkMethod then
+      begin
+        Result := CreateBinaryOp(opcCALL, E.Coord);
+        Result.Typ := E.Typ;
+        TBinaryOp(Result).Left := S;
+        TBinaryOp(Result).Right := CreateListOp(E.Coord);
+      end;
+    end;
+    else
+      Result := CreateSymbolOpFrom(TSymbolExpr(E));
+      S := Result;
   end;
-
   if NeedSelf then
   begin
-    // 添加Self
     L := CreateBinaryOp(opcMEMBER, E.Coord);
     L.Typ := E.Typ;
     TBinaryOp(L).Left := CreateSymbolOp(GetInstVar(Ref), E.Coord);
@@ -2111,10 +1722,9 @@ begin
     else
     begin
       TBinaryOp(L).Right := S;
-      Result := L
+      Result := L;
     end;
   end;
-
   if (Ref.NodeKind = nkConstant) then
   begin
     if TConstant(Ref).ConstType.TypeCode = typString then
@@ -2140,11 +1750,12 @@ begin
   case E.OpCode of
     opNOT: Fun := FContext.GetSystemRoutine(srVarNot);
     opNEG: Fun := FContext.GetSystemRoutine(srVarNeg);
-  else
-    Err('EmitExpr_UnaryVarOp: Invalid variant op');
-    Fun := nil;
+    else
+    begin
+      Err('EmitExpr_UnaryVarOp: Invalid variant op');
+      Fun := nil;
+    end;
   end;
-
   Op1 := EmitExpr(E.Operand);
   if Op1.Typ.TypeCode <> typVariant then
     Err('EmitExpr_UnaryVarOp: Op1 not variant');
@@ -2160,12 +1771,9 @@ var
   S, SArgs: TSymbolOp;
   Args: array of TBaseOp;
   L: TBaseOp;
-  I: Integer;
+  I: integer;
 begin
-  // procedure _VarArrayGet(var V, Result: Variant; Indices: array of NativeInt);
-
   Assert(E.Right.OpCode = opLIST);
-
   V := AddVar(FContext.FVariantType);
   Result := CreateSymbolOp(V, E.Coord);
   S := CreateSymbolOp(V, E.Coord);
@@ -2173,7 +1781,6 @@ begin
   SetLength(Args, TListExpr(E.Right).Count);
   for I := 0 to Length(Args) - 1 do
     Args[I] := EmitExpr(TListExpr(E.Right).Items[I]);
-
   Fun := FContext.GetSystemRoutine(srVarArrayGet);
   SArgs := EmitOAInitStmt(E.Right.Coord, FContext.FIntegerType, Args);
   EmitCallCmd(Fun, E.Coord, [L, S, SArgs]);
@@ -2182,31 +1789,25 @@ end;
 function TCodePack.EmitExpr_VarCmp(E: TBinaryExpr): TBinaryOp;
 var
   Op1, Op2, Op3: TBaseOp;
-  varOpCode: Integer;
+  varOpCode: integer;
   Fun: TFunction;
   CallOp: TBinaryOp;
 begin
-  // opNE..opGE
   Result := CreateBinaryOpFrom(E);
   Op1 := EmitExpr(E.Left);
   Op2 := EmitExpr(E.Right);
-
   if Op1.Typ.TypeCode <> typVariant then
     Op1 := EmitCastToVar(Op1, False);
-
   if Op2.Typ.TypeCode <> typVariant then
     Op2 := EmitCastToVar(Op2, False);
-
   if (E.OpCode >= opNE) and (E.OpCode <= opGE) then
     varOpCode := VarOpMaps[E.OpCode]
   else
     varOpCode := -1;
   Assert(varOpCode <> -1, 'TCodeSetup.EmitVarCmp: Invalid variant op');
   Op3 := CreateConstOp(E.Coord, varOpCode);
-
   Fun := FContext.GetSystemRoutine(srVarComp);
   CallOp := CreateCall(Fun, E.Coord, [Op1, Op2, Op3]);
-
   Result.Left := CallOp;
   Result.Left.Typ := Fun.ReturnType;
   Result.Right := CreateConstOp(E.Coord, 0);
@@ -2215,35 +1816,30 @@ end;
 function TCodePack.EmitExpr_VarOp(E: TBinaryExpr): TBaseOp;
 var
   Op1, Op2, Op3: TBaseOp;
-  varOpcode: Integer;
+  varOpcode: integer;
   Fun: TFunction;
   Ref: TSymbol;
 begin
   if E.Left.Typ.TypeCode = typVariant then
   begin
     Ref := E.Left.GetReference;
-    // 如果左表达式是临时变量，则直接使用它；反之，则复制一份
-    if (Ref <> nil) and (Ref.NodeKind = nkVariable)
-        and (vaHidden in TVariable(Ref).VarAttr) then
+    if (Ref <> nil) and (Ref.NodeKind = nkVariable) and (vaHidden in TVariable(Ref).VarAttr) then
       Op1 := EmitExpr(E.Left)
     else
       Op1 := EmitVarCopy(EmitExpr(E.Left));
   end
   else
     Op1 := EmitCastToVar(EmitExpr(E.Left), False);
-
   if E.Right.Typ.TypeCode = typVariant then
     Op2 := EmitExpr(E.Right)
   else
     Op2 := EmitCastToVar(EmitExpr(E.Right), False);
-
   if (E.OpCode >= opADD) and (E.OpCode <= opSHR) then
     varOpCode := VarOpMaps[E.OpCode]
   else
     varOpCode := -1;
   Assert(varOpCode <> -1, 'TCodeSetup.EmitExpr_VarOp: Invalid variant op');
   Op3 := CreateConstOp(E.Coord, varOpCode);
-
   Fun := FContext.GetSystemRoutine(srVarOp);
   EmitCallCmd(Fun, E.Coord, [Op1, Op2, Op3]);
   Result := CopyOP(Op1);
@@ -2260,40 +1856,29 @@ end;
 
 procedure TCodePack.EmitIntfCastOp(E: TBinaryExpr; AsgOp: TBaseOp);
 var
-//  ValOp: TBinaryOp;
   IidOp: TConstOp;
   LT: TType;
   IntfTyp: TInterfaceType;
-//  Entry: TClassIntfEntry;
   Cmd: TCmd;
 begin
   Assert(E.OpCode = opAS);
   Assert(E.Right.Typ.TypeCode = typInterface);
   Assert(AsgOp.Typ.TypeCode = typInterface);
-
   LT := E.Left.Typ;
   IntfTyp := TInterfaceType(E.Right.Typ);
-
   if LT.TypeCode = typClass then
-  begin
-    // cast class to intf
-    EmitObj2Intf(EmitExpr(E.Left), AsgOp, IntfTyp, True);
-  end
+    EmitObj2Intf(EmitExpr(E.Left), AsgOp, IntfTyp, True)
   else if LT.TypeCode = typInterface then
   begin
-    // Call _IntfCast
     IidOp := CreateConstOp(E.Right.Coord);
     ValFromIID(IidOp.Value, IntfTyp);
     Cmd := CreateCmd(TCallCmd, E.Coord);
-    TCallCmd(Cmd).CallOp :=
-        CreateCall(FContext.GetSystemRoutine(srIntfCast), E.Coord,
-                [AsgOp, EmitExpr(E.Left), IidOp]);
+    TCallCmd(Cmd).CallOp := CreateCall(FContext.GetSystemRoutine(srIntfCast), E.Coord, [AsgOp, EmitExpr(E.Left), IidOp]);
     AddCmd(Cmd);
   end;
 end;
 
-procedure TCodePack.EmitMarkCmd(const Lab: string; const Coord: TAstNodeCoord
-  );
+procedure TCodePack.EmitMarkCmd(const Lab: string; const Coord: TAstNodeCoord);
 var
   Cmd: TCmd;
 begin
@@ -2302,23 +1887,21 @@ begin
   AddCmd(Cmd);
 end;
 
-function TCodePack.EmitOAInitStmt(const Coord: TAstNodeCoord;
-  ElemType: TType; const Args: array of TBaseOp; Start: Integer): TSymbolOp;
+function TCodePack.EmitOAInitStmt(const Coord: TAstNodeCoord; ElemType: TType;
+  const Args: array of TBaseOp; Start: integer): TSymbolOp;
 var
   LStmt: TOAInitCmd;
   LArrType: TOpenArrayType;
   LArrVar: TVariable;
-  i: Integer;
+  i: integer;
 begin
   if Length(Args) - Start > 0 then
   begin
-    // 创建数组类型
     LArrType := TOpenArrayType.Create;
     AddNode(LArrType);
     LArrType.ElementCount := Length(Args) - Start;
     LArrType.ElementType := ElemType;
     LArrType.Parent := FCurFunc;
-
     LArrVar := AddVar(LArrType);
   end
   else
@@ -2331,8 +1914,7 @@ begin
   Result := CreateSymbolOp(LArrVar, Coord);
 end;
 
-procedure TCodePack.EmitObj2Intf(Obj, AsgOp: TBaseOp; Intf: TInterfaceType;
-  DoCast: Boolean);
+procedure TCodePack.EmitObj2Intf(Obj, AsgOp: TBaseOp; Intf: TInterfaceType; DoCast: boolean);
 var
   typ: TClassType;
   Entry: TClassIntfEntry;
@@ -2360,20 +1942,13 @@ begin
     begin
       IidOp := CreateConstOp(Obj.Coord);
       ValFromIID(IidOp.Value, Intf);
-      CallOp := CreateCall(FContext.GetSystemRoutine(srIntfCast),
-                         Obj.Coord, [
-                            AsgOp, ValOp, IidOp
-                         ]);
+      CallOp := CreateCall(FContext.GetSystemRoutine(srIntfCast), Obj.Coord, [AsgOp, ValOp, IidOp]);
     end
     else
-      CallOp := CreateCall(FContext.GetSystemRoutine(srIntfCopy),
-                         Obj.Coord, [
-                            AsgOp, ValOp
-                         ]);
+      CallOp := CreateCall(FContext.GetSystemRoutine(srIntfCopy), Obj.Coord, [AsgOp, ValOp]);
   end
   else
   begin
-    // call obj.ImplGetter
     ValOp := CreateBinaryOp(opcMember, Obj.Coord);
     ValOp.Left := Obj;
     ValOp.Right := CreateSymbolOp(Entry.ImplGetter, Obj.Coord);
@@ -2388,19 +1963,19 @@ begin
   AddCmd(Cmd);
 end;
 
-function TCodePack.EmitObj2Intf(Obj: TBaseOp; Intf: TInterfaceType;
-  DoCast: Boolean): TBaseOp;
+function TCodePack.EmitObj2Intf(Obj: TBaseOp; Intf: TInterfaceType; DoCast: boolean): TBaseOp;
 var
   S: TSymbolOp;
 begin
-  S := CreateSymbolOp(AddVar(Intf), Obj.Coord);
+  S :=
+    CreateSymbolOp(AddVar(Intf), Obj.Coord);
   Result := CreateSymbolOp(S.Reference, S.Coord);
   EmitObj2Intf(Obj, S, Intf, DoCast);
 end;
 
 procedure TCodePack.EmitStrAddOp(E: TBinaryExpr; AsgOp: TBaseOp);
 var
-  LCount: Integer;
+  LCount: integer;
   LAddends: array of TExpr;
   LOperands: array of TBaseOp;
 
@@ -2412,26 +1987,24 @@ var
     Inc(LCount);
   end;
 
-  // 取得所有相加的字符串
   procedure GetOperands(E: TBinaryExpr);
   begin
     if E.Left.OpCode = opADD then
       GetOperands(TBinaryExpr(E.Left))
     else
       Append(E.Left);
-
     if E.Right.OpCode = opADD then
       GetOperands(TBinaryExpr(E.Right))
     else
-      Append(E.Right);
+      Append(
+        E.Right);
   end;
 
 const
   LongStrTypes = [strAnsi, strWide, strUnicode];
   StrTypes = [strAnsi, strWide, strUnicode, strAShort, strWShort];
-
 var
-  i, cat: Integer;
+  i, cat: integer;
   desT: TStringType;
   desE: TBaseOp;
   Fun: TFunction;
@@ -2447,44 +2020,29 @@ var
     Result := TCallCmd(CreateCmd(TCallCmd, E.Coord));
     Result.CallOp := CreateCall(Fun, E.Coord, [desE, LArr, LHighExpr]);
   end;
+
 begin
-  // 字符串相加，含有UnicodeString，转为UnicodeString相加
-  // 含有WideString，转为WideString
-  // ShortString相加，转为String
-
-  // 为了效率，则一次性连接多个字符：
-  // 如 s := s1 + s2 + s3 + s4，转为函数调用：
-  // AStrCatN(s, s1, s2, s3, s4)
-
   LCount := 0;
   GetOperands(E);
-
   SetLength(LOperands, LCount);
   for i := 0 to LCount - 1 do
   begin
-    // LOperands[i].Typ 必须是与字符串类型兼容的
     LOperands[i] := EmitExpr(LAddends[i]);
   end;
-
   if AsgOp.Typ.TypeCode <> typString then
     Err('EmitStrAddOp: Invalid AsgExpr type');
   if E.Typ.TypeCode <> typString then
     Err('EmitStrAddOp: Invalid E type');
-
   desT := TStringType(E.Typ);
   if TStringType(AsgOp.Typ).Kind <> desT.Kind then
     desE := CreateSymbolOp(AddVar(desT), E.Coord)
   else
     desE := AsgOp;
-
   for i := 0 to LCount - 1 do
   begin
     if not LOperands[i].Typ.Equals(desT) then
       LOperands[i] := EmitCastToStr(LOperands[i], desT);
   end;
-
-  // todo 9: 需要合并字符串常量
-
   if LCount = 2 then
   begin
     if desE = LOperands[0] then
@@ -2495,31 +2053,30 @@ begin
   else
     cat := 4;
   case TStringType(desT).Kind of
-    strAnsi:
-      if cat = 2 then
+    strAnsi: if cat = 2 then
         Fun := FContext.GetSystemRoutine(srAStrCat)
-      else if cat = 3 then
+      else
+      if cat = 3 then
         Fun := FContext.GetSystemRoutine(srAStrCat3)
       else
         Fun := FContext.GetSystemRoutine(srAStrCatN);
-    strWide:
-      if cat = 2 then
+    strWide: if cat = 2 then
         Fun := FContext.GetSystemRoutine(srWStrCat)
-      else if cat = 3 then
+      else
+      if cat = 3 then
         Fun := FContext.GetSystemRoutine(srWStrCat3)
       else
         Fun := FContext.GetSystemRoutine(srWStrCatN);
-    strUnicode:
-      if cat = 2 then
+    strUnicode: if cat = 2 then
         Fun := FContext.GetSystemRoutine(srUStrCat)
-      else if cat = 3 then
+      else
+      if cat = 3 then
         Fun := FContext.GetSystemRoutine(srUStrCat3)
       else
         Fun := FContext.GetSystemRoutine(srUStrCatN);
-  else
-    Assert(False);
+    else
+      Assert(False);
   end;
-
   Inst := TCallCmd(CreateCmd(TCallCmd, E.Coord));
   if cat = 2 then
     Inst.CallOp := CreateCall(Fun, E.Coord, [desE, LOperands[1]])
@@ -2530,7 +2087,6 @@ begin
   AddCmd(Inst);
   if desE <> AsgOp then
   begin
-    // 此时desE是个TSymbolExpr
     desE := CreateSymbolOp(TSymbolOp(desE).Reference, desE.Coord);
     EmitCastToStr(desE, AsgOp, desT);
   end;
@@ -2547,9 +2103,7 @@ end;
 
 procedure TCodePack.EmitStrAsg(E, Dest: TBaseOp);
 const
-  StrAsgProc: array[TStringKind] of TSystemRoutine = (
-    srAStrAsg, srWStrAsg, srUStrAsg, srSStrAsg, srTrunc//srSWStrAsg
-    );
+  StrAsgProc: array[TStringKind] of TSystemRoutine = (srAStrAsg, srWStrAsg, srUStrAsg, srSStrAsg, srTrunc);
 var
   sr: TSystemRoutine;
   Fun: TFunctionDecl;
@@ -2560,21 +2114,18 @@ begin
   sr := StrAsgProc[TStringType(E.Typ).Kind];
   Fun := FContext.GetSystemRoutine(sr);
   if sr = srSStrAsg then
-    Self.EmitCallCmd(Fun, E.Coord, [Dest,
-                  CreateConstOp(E.Coord, TStringType(E.Typ).CharCount), E]
-          )
+    Self.EmitCallCmd(Fun, E.Coord, [Dest, CreateConstOp(E.Coord, TStringType(E.Typ).CharCount), E])
   else
     Self.EmitCallCmd(Fun, E.Coord, [Dest, E]);
 end;
 
 function TCodePack.EmitStrCmp(E: TBinaryOp): TBaseOp;
 type
-  TBaseKind = (bkUStr, bkWStr, bkAStr, bkSStr, bkSWStr, bkPACh, bkPWCh,
-               bkAArr, bkWArr, bkAChr, bkWChr);
-const               
-  BaseStr: array[bkUStr..bkWChr] of string = (
-    'UStr', 'WStr', 'AStr', 'SStr', 'SWStr', 'Pa', 'Pw', 'Aarr', 'Warr', 'ACh', 'WCh'
-  );
+  TBaseKind = (bkUStr, bkWStr, bkAStr, bkSStr, bkSWStr, bkPACh,
+    bkPWCh, bkAArr, bkWArr, bkAChr, bkWChr);
+const
+  BaseStr: array[bkUStr..bkWChr] of string =
+    ('UStr', 'WStr', 'AStr', 'SStr', 'SWStr', 'Pa', 'Pw', 'Aarr', 'Warr', 'ACh', 'WCh');
 
   function GetBase(T: TType): TBaseKind;
   var
@@ -2582,15 +2133,15 @@ const
   begin
     bk := bkUStr;
     case T.TypeCode of
-      typString:
-        case TStringType(T).Kind of
+      typString: case TStringType(T).Kind of
           strAnsi: bk := bkAStr;
           strWide: bk := bkWStr;
-          strUnicode: bk := bkUStr;
+          strUnicode: bk :=
+              bkUStr;
           strAShort: bk := bkSStr;
           strWShort: bk := bkSWStr;
-        else
-          Assert(False);
+          else
+            Assert(False);
         end;
       typChar:
         if TCharType(T).Kind = charAnsi then
@@ -2599,13 +2150,13 @@ const
           bk := bkWChr;
       typPAnsiChar: bk := bkPACh;
       typPWideChar: bk := bkPWCh;
-    else
-      if T.IsPackedStringAnsi then
-        bk := bkAArr
-      else if T.IsPackedStringWide then
-        bk := bkWArr
       else
-        Assert(False);
+        if T.IsPackedStringAnsi then
+          bk := bkAArr
+        else if T.IsPackedStringWide then
+          bk := bkWArr
+        else
+          Assert(False);
     end;
     Result := bk;
   end;
@@ -2614,14 +2165,13 @@ const
   var
     c: TConstant;
   begin
-    if Op.Typ.Equals(typ) then Exit;
-
+    if Op.Typ.Equals(typ) then
+      Exit;
     c := Op.GetConstantSymbol;
-    if c = nil then Exit;
-
-    if ((typ.TypeCode = typString)
-          and (TStringType(typ).Kind in [strAnsi..strUnicode]))
-      or typ.IsPAnsiChar or typ.IsPWideChar then
+    if c = nil then
+      Exit;
+    if ((typ.TypeCode = typString) and (TStringType(typ).Kind in [strAnsi..strUnicode])) or
+      typ.IsPAnsiChar or typ.IsPWideChar then
     begin
       C := AddStrConst(ValToStr(c.Value), typ);
       Op.Reference := C;
@@ -2634,13 +2184,13 @@ const
   var
     CastOp: TBinaryOp;
   begin
-    CastOp := CreateBinaryOp(opcCast, S.Coord);
+    CastOp :=
+      CreateBinaryOp(opcCast, S.Coord);
     CastOp.Right := S;
     CastOp.Left := CreateSymbolOp(FContext.FPointerType, S.Coord);
     E.Left := CastOp;
     E.Right := CreateConstOp(E.Coord);
     E.OpCode := opcNIL;
-    //ValFromPtr(TConstOp(E.Right).Value, nil);
     Result := E;
   end;
 
@@ -2652,12 +2202,10 @@ var
   CallOp: TBinaryOp;
 begin
   Assert(E.OpCode in [opcNE, opcEQ, opcLT, opcLE, opcGT, opcGE]);
-
   if E.Left.IsConstSymbol then
     AdjustType(TSymbolOp(E.Left), E.Right.Typ)
   else if E.Right.IsConstSymbol then
     AdjustType(TSymbolOp(E.Right), E.Left.Typ);
-
   Lb := GetBase(E.Left.Typ);
   Rb := GetBase(E.Right.Typ);
   if Lb = Rb then
@@ -2671,20 +2219,17 @@ begin
       bkAArr: s := '_AArrComp';
       bkWArr: s := '_WArrComp';
       bkAChr, bkWChr, bkPACh, bkPWCh:
-        begin
-        // 直接比较
-          Result := E;
-          Exit;
-        end;
+      begin
+        Result := E;
+        Exit;
+      end;
     end;
   end
-  else if ((Lb = bkAChr) and (Rb = bkWChr)) or
-          ((Rb = bkAChr) and (Lb = bkWChr)) then
+  else if ((Lb = bkAChr) and (Rb = bkWChr)) or ((Rb = bkAChr) and (Lb = bkWChr)) then
   begin
     Err('EmitStrOp: Operand not applicable');
   end
-  else if ((Lb = bkPACh) and (Rb = bkPWCh)) or
-          ((Rb = bkPACh) and (Lb = bkPWCh)) then
+  else if ((Lb = bkPACh) and (Rb = bkPWCh)) or ((Rb = bkPACh) and (Lb = bkPWCh)) then
   begin
     Err('EmitStrOp: Operand not applicable');
   end
@@ -2692,39 +2237,28 @@ begin
   begin
     s := '_' + BaseStr[Lb] + 'Comp' + BaseStr[Rb];
   end;
-
   Sym := FContext.FSystemUnit.FindSymbol(s);
   if not (Assigned(Sym) and (Sym.NodeKind = nkFunc)) then
     Err('EmitStrOp: System routine %s not missing', [s]);
-
   Fun := TFunctionDecl(Sym);
   if Lb in [bkAArr, bkWArr] then
   begin
     if rb in [bkAArr, bkWArr] then
     begin
-      CallOp := CreateCall(Fun, E.Coord, [
-        E.Left,
-        CreateConstOp(E.Coord, TArrayType(E.Left.Typ).ElementCount),
-        E.Right,
-        CreateConstOp(E.Coord, TArrayType(E.Left.Typ).ElementCount)
-      ]);
+      CallOp :=
+        CreateCall(Fun, E.Coord, [E.Left, CreateConstOp(E.Coord, TArrayType(E.Left.Typ).ElementCount),
+        E.Right, CreateConstOp(E.Coord, TArrayType(E.Left.Typ).ElementCount)]);
     end
     else
     begin
-      CallOp := CreateCall(Fun, E.Coord, [
-        E.Left,
-        CreateConstOp(E.Coord, TArrayType(E.Left.Typ).ElementCount),
-        E.Right
-      ]);
+      CallOp := CreateCall(Fun, E.Coord, [E.Left, CreateConstOp(E.Coord, TArrayType(E.Left.Typ).ElementCount),
+        E.Right]);
     end;
   end
   else if rb in [bkAArr, bkWArr] then
   begin
-    CallOp := CreateCall(Fun, E.Coord, [
-      E.Left,
-      E.Right,
-      CreateConstOp(E.Coord, TArrayType(E.Left.Typ).ElementCount)
-    ]);
+    CallOp :=
+      CreateCall(Fun, E.Coord, [E.Left, E.Right, CreateConstOp(E.Coord, TArrayType(E.Left.Typ).ElementCount)]);
   end
   else
     CallOp := CreateCall(Fun, E.Coord, [E.Left, E.Right]);
@@ -2766,7 +2300,7 @@ end;
 
 procedure TCodePack.RemoveNode(Node: TObject);
 var
-  I: Integer;
+  I: integer;
 begin
   for I := FNodes.Count - 1 downto 0 do
     if FNodes[I] = Node then
@@ -2786,7 +2320,7 @@ begin
     FSelfSym := Func.LocalSymbols.Find('Self');
     FSelfTypeSym := Func.Parent;
     Assert(FSelfSym <> nil);
-    Assert((FSelfTypeSym <> nil) and (FSelfTypeSym.NodeKind = nkType) );
+    Assert((FSelfTypeSym <> nil) and (FSelfTypeSym.NodeKind = nkType));
   end
   else
   begin
@@ -2807,9 +2341,9 @@ procedure TCodePack.SetupFunc(F: TFunction);
     Code.Cmds.Add(Cmd);
   end;
 
-  function IsVarCleanNeed(Vars: TList): Boolean;
+  function IsVarCleanNeed(Vars: TFPList): boolean;
   var
-    i: Integer;
+    i: integer;
     sym: TSymbol;
   begin
     Result := True;
@@ -2817,15 +2351,12 @@ procedure TCodePack.SetupFunc(F: TFunction);
     begin
       sym := TSymbol(Vars[i]);
       case sym.NodeKind of
-        nkVariable:
-          if (vaLocal in TVariable(sym).VarAttr)
-            and not (vaSelf in TVariable(sym).VarAttr)
-            and not (vaResult in TVariable(sym).VarAttr)
-            and NeedFree(TVariable(sym).VarType) then Exit;
-        nkFuncParam:
-          if (saUsed in sym.Attr)
-            and (TFuncParam(Sym).Modifier = argDefault)
-            and NeedFree(TFuncParam(sym).ParamType) then Exit;
+        nkVariable: if (vaLocal in TVariable(sym).VarAttr) and not (vaSelf in TVariable(sym).VarAttr) and
+            not (vaResult in TVariable(sym).VarAttr) and NeedFree(TVariable(sym).VarType) then
+            Exit;
+        nkFuncParam: if (saUsed in sym.Attr) and (TFuncParam(Sym).Modifier = argDefault) and
+            NeedFree(TFuncParam(sym).ParamType) then
+            Exit;
       end;
     end;
     Result := False;
@@ -2833,7 +2364,7 @@ procedure TCodePack.SetupFunc(F: TFunction);
 
   procedure RemoveVarCleanFunc();
   var
-    i: Integer;
+    i: integer;
     cmd: TCmd;
     sym: TSymbol;
   begin
@@ -2854,9 +2385,9 @@ procedure TCodePack.SetupFunc(F: TFunction);
     end;
   end;
 
-  procedure SetupNested(Funcs: TList);
+  procedure SetupNested(Funcs: TFPList);
   var
-    i: Integer;
+    i: integer;
   begin
     for i := 0 to Funcs.Count - 1 do
     begin
@@ -2865,61 +2396,47 @@ procedure TCodePack.SetupFunc(F: TFunction);
   end;
 
 var
-  I: Integer;
+  I: integer;
   Sym: TSymbol;
   LCode: TCode;
   LCmd: TCmd;
 begin
   FResultSym := F.LocalSymbols.Find('Result');
-  if not ((FResultSym <> nil)
-      and (FResultSym.NodeKind = nkVariable)
-      and (vaResult in TVariable(FResultSym).VarAttr)) then
+  if not ((FResultSym <> nil) and (FResultSym.NodeKind = nkVariable) and
+    (vaResult in TVariable(FResultSym).VarAttr)) then
   begin
     FResultSym := nil;
   end;
-
   FCurFunc := F;
   FCurCode := TCode.Create;
-
   FCurCode.VarCleanFunc := CreateFunc;
   FCurCode.VarCleanFunc.Parent := FCurFunc;
   FCurCode.VarCleanFunc.Attr := [saInternal];
   FCurCode.VarCleanFunc.Name := '$varclean';
-  FCurCode.VarCleanFunc.Level := FCurFunc.Level + 1;
-
-  // 需要先加cleanup过程，Exit 要调用之后才能退出函数
+  FCurCode.VarCleanFunc.Level :=
+    FCurFunc.Level + 1;
   FCleanupStack.Add(FCurCode.VarCleanFunc);
-
   for i := 0 to F.LocalSymbols.Count - 1 do
   begin
     Sym := F.LocalSymbols[i];
     case Sym.NodeKind of
-      nkVariable, nkFuncParam:
-        FCurCode.Vars.Add(Sym);
-      nkFunc:
-        FCurCode.Funcs.Add(Sym);
+      nkVariable, nkFuncParam: FCurCode.Vars.Add(Sym);
+      nkFunc: FCurCode.Funcs.Add(Sym);
     end;
   end;
-
   LCmd := CreateCmd(TCleanupCmd, F.Coord);
   TCleanupCmd(LCmd).CleanupProc := FCurCode.VarCleanFunc;
   AddCmd(LCmd);
-
   FQuitLabel := '.quit';
   SetupStmt(F.StartStmt);
-
-  Assert(FCleanupStack.Count=1);
+  Assert(FCleanupStack.Count = 1);
   FCleanupStack.Clear;
-
   F.Codes := FCurCode;
-
-  // 创建清除过程
   if IsVarCleanNeed(FCurCode.Vars) then
   begin
     LCmd := CreateCmd(TLeaveBlockCmd, F.Coord);
     AddCmd(LCmd);
     EmitCallCmd(FCurCode.VarCleanFunc, F.Coord, []);
-
     LCode := TCode.Create;
     FCurCode.VarCleanFunc.Codes := LCode;
     AddVarCleanCmd(LCode, F.Coord);
@@ -2927,31 +2444,26 @@ begin
   else
   begin
     RemoveVarCleanFunc();
-    FCurCode.Cmds.Delete(0);  // 第一个是Cleanup
+    FCurCode.Cmds.Delete(0);
     FCurCode.VarCleanFunc := nil;
   end;
-
   if FCurFunc.CallConvention = ccSafecall then
   begin
     LCmd := CreateCmd(THandleScExceptCmd, FCurFunc.Coord);
     FCurCode.Cmds.Insert(0, LCmd);
     CreateExPtrVar;
   end
-  else if (FCurFunc.NodeKind = nkMethod)
-      and (TMethod(FCurFunc).MethodKind = mkConstructor) then
+  else if (FCurFunc.NodeKind = nkMethod) and (TMethod(FCurFunc).MethodKind = mkConstructor) then
   begin
     LCmd := CreateCmd(THandleCtorExceptCmd, FCurFunc.Coord);
     FCurCode.Cmds.Insert(0, LCmd);
     CreateExPtrVar;
   end;
-
   EmitMarkCmd(FQuitLabel, F.Coord);
-
   if (FCurCode.Funcs.Count > 0) and (FSelfSym <> nil) then
   begin
     Include((FSelfSym as TVariable).States, vsNestRef);
   end;
-
   FCurCode := nil;
   FCurFunc := nil;
   SetupNested(TCode(F.Codes).Funcs);
@@ -2959,32 +2471,22 @@ end;
 
 procedure TCodePack.SetupStmt(Stmt: TStatement);
 var
-  i: Integer;
+  i: integer;
 begin
   case Stmt.StmtKind of
-    skCompoundStmt:
-      for i := 0 to TCompoundStmt(Stmt).Statements.Count - 1 do
+    skCompoundStmt: for i := 0 to TCompoundStmt(Stmt).Statements.Count - 1 do
       begin
         SetupStmt(TStatement(TCompoundStmt(Stmt).Statements[i]));
       end;
-    skAssignmentStmt:
-      SetupStmt_Assign(TAssignmentStmt(Stmt));
-    skIfStmt:
-      SetupStmt_If(TIfStmt(Stmt));
-    skWhileStmt:
-      SetupStmt_While(TWhileStmt(Stmt));
-    skRepeatStmt:
-      SetupStmt_Repeat(TRepeatStmt(Stmt));
-    skForStmt:
-      SetupStmt_For(TForStmt(Stmt));
-    skTryStmt:
-      SetupStmt_Try(TTryStmt(Stmt));
-    skCallStmt:
-      SetupStmt_Call(TCallStmt(Stmt));
-    skRaiseStmt:
-      SetupStmt_Raise(TRaiseStmt(Stmt));
-    skCaseStmt:
-      SetupStmt_Case(TCaseStmt(Stmt));
+    skAssignmentStmt: SetupStmt_Assign(TAssignmentStmt(Stmt));
+    skIfStmt: SetupStmt_If(TIfStmt(Stmt));
+    skWhileStmt: SetupStmt_While(TWhileStmt(Stmt));
+    skRepeatStmt: SetupStmt_Repeat(TRepeatStmt(Stmt));
+    skForStmt: SetupStmt_For(TForStmt(Stmt));
+    skTryStmt: SetupStmt_Try(TTryStmt(Stmt));
+    skCallStmt: SetupStmt_Call(TCallStmt(Stmt));
+    skRaiseStmt: SetupStmt_Raise(TRaiseStmt(Stmt));
+    skCaseStmt: SetupStmt_Case(TCaseStmt(Stmt));
   end;
 end;
 
@@ -2993,7 +2495,8 @@ var
   LV, RV: TBaseOp;
   R: TExpr;
   S: TAssignCmd;
-  function IsSafecall(E: TExpr): Boolean;
+
+  function IsSafecall(E: TExpr): boolean;
   var
     Sym: TFunctionDecl;
   begin
@@ -3019,27 +2522,19 @@ var
     Fun: TFunctionDecl;
     LT, RT: TSetType;
   begin
-    // proc _SetCopy(var Dest; const Src; d_lo, d_hi, s_lo, s_hi: Byte);
-
     Assert(LV.Typ.TypeCode = typSet);
     Assert(RV.Typ.TypeCode = typSet);
     LT := TSetType(LV.Typ);
     RT := TSetType(RV.Typ);
-
     Fun := FContext.GetSystemRoutine(srSetCopy);
-    EmitCallCmd(Fun, LV.Coord, [LV, RV,
-        CreateConstOp(LV.Coord, LT.LowByte),
-        CreateConstOp(LV.Coord, LT.HighByte),
-        CreateConstOp(LV.Coord, RT.LowByte),
-        CreateConstOp(LV.Coord, RT.HighByte)
-      ]);
+    EmitCallCmd(Fun,
+      LV.Coord, [LV, RV, CreateConstOp(LV.Coord, LT.LowByte), CreateConstOp(LV.Coord, LT.HighByte),
+      CreateConstOp(LV.Coord, RT.LowByte), CreateConstOp(LV.Coord, RT.HighByte)]);
   end;
 
   procedure EmitStrClr(LV: TBaseOp);
   const
-    ClrFun: array[TStringKind] of TSystemRoutine = (
-      srAStrClr, srWStrClr, srUStrClr, srSStrClr, srSWStrClr
-    );
+    ClrFun: array[TStringKind] of TSystemRoutine = (srAStrClr, srWStrClr, srUStrClr, srSStrClr, srSWStrClr);
   var
     Fun: TFunctionDecl;
     Cmd: TCmd;
@@ -3056,10 +2551,7 @@ var
     Cmd: TCmd;
   begin
     Cmd := CreateCmd(TCallCmd, Op.Coord);
-    TCallCmd(cmd).CallOp := CreateCall(
-            FContext.GetSystemRoutine(srIntfClr),
-            Op.Coord, [Op]
-          );
+    TCallCmd(cmd).CallOp := CreateCall(FContext.GetSystemRoutine(srIntfClr), Op.Coord, [Op]);
     AddCmd(Cmd);
   end;
 
@@ -3068,10 +2560,7 @@ var
     Cmd: TCmd;
   begin
     Cmd := CreateCmd(TCallCmd, Des.Coord);
-    TCallCmd(cmd).CallOp := CreateCall(
-            FContext.GetSystemRoutine(srIntfCopy),
-            Des.Coord, [Des, Src]
-          );
+    TCallCmd(cmd).CallOp := CreateCall(FContext.GetSystemRoutine(srIntfCopy), Des.Coord, [Des, Src]);
     AddCmd(Cmd);
   end;
 
@@ -3097,18 +2586,12 @@ var
     else
       Result := Self.EmitExpr(E);
   end;
+
 begin
   LV := EmitExpr(Stmt.Left);
-
   R := Stmt.Right;
-  // 忽略无用的Cast
   while (R.OpCode = opCAST) and R.Typ.Equals(TBinaryExpr(R).Right.Typ) do
-  begin
     R := TBinaryExpr(R).Right;
-  end;
-
-  // 对于string, record, interface, variant, array, dynarray这些类型
-  // 的赋值，以及Safecall，必须转为函数调用
   if IsSpecialType(LV.Typ) or IsSafecall(R) then
   begin
     if LV.Typ.TypeCode = typString then
@@ -3119,19 +2602,15 @@ begin
         EmitCallSpecial(TBinaryExpr(R), LV)
       else if R.IsEmptyString then
         EmitStrClr(LV)
-      else begin
+      else
+      begin
         RV := Self.EmitExpr(R);
-        // 做赋值
         if not RV.Typ.IsStringArithCompatible then
           Err('SetupStmt_Assign: Invalid string assign');
         if RV.Typ.Equals(LV.Typ) then
           Self.EmitStrAsg(RV, LV)
         else if RV.IsConstSymbol then
-        begin
-          Self.EmitStrAsg(
-            CastStrConst(TConstant(TSymbolOp(RV).Reference), Lv.Typ, LV.Coord),
-            LV);
-        end
+          Self.EmitStrAsg(CastStrConst(TConstant(TSymbolOp(RV).Reference), Lv.Typ, LV.Coord), LV)
         else
           Self.EmitCastToStr(RV, LV, TStringType(LV.Typ));
       end;
@@ -3139,44 +2618,27 @@ begin
     else if LV.Typ.TypeCode = typInterface then
     begin
       if R.OpCode = opAS then
-      begin
-        // two case:
-        // intf as InterfaceType
-        // obj as InterfaceType
-        EmitIntfCastOp(TBinaryExpr(R), LV);
-      end
+        EmitIntfCastOp(TBinaryExpr(R), LV)
       else if (R.OpCode = opCALL) and (R.Typ.TypeCode = typInterface) then
-      begin
-        // 无需检查接口类型是否一致，因为CheckExpr已经保证它们是可以赋值的
         EmitCallSpecial(TBinaryExpr(R), LV)
-      end
       else if R.Typ.TypeCode = typClass then
-      begin
-        EmitObj2Intf(EmitExpr(R), LV, TInterfaceType(LV.Typ));
-      end
+        EmitObj2Intf(EmitExpr(R), LV, TInterfaceType(LV.Typ))
       else
       begin
         if R.IsNilConst then
           EmitIntfClr(LV)
         else
-          EmitIntfCopy(LV, EmitExpr(R))
+          EmitIntfCopy(LV, EmitExpr(R));
       end;
     end
     else if (R.OpCode = opCALL) and R.Typ.Equals(LV.Typ) then
-    begin
       EmitCallSpecial(TBinaryExpr(R), LV)
-    end
     else
     begin
       RV := Self.EmitExpr(R);
-      // 做赋值
       case LV.Typ.TypeCode of
         typRecord: Assert(False);
-        //typVariant:
-        //typDynamicArray:
-        //typArray:
-        typSet:
-          EmitSetAssign(RV, LV);
+        typSet: EmitSetAssign(RV, LV);
       end;
     end;
   end
@@ -3190,8 +2652,6 @@ begin
     begin
       RV := CastStrConst(TConstant(TSymbolOp(RV).Reference), Lv.Typ, LV.Coord);
     end;
-
-    // 对于Set，调用 _Setcopy
     if LV.Typ.TypeCode = typSet then
     begin
       EmitSetAssign(RV, LV);
@@ -3204,7 +2664,6 @@ begin
       AddCmd(S);
     end;
   end;
-
 end;
 
 procedure TCodePack.SetupStmt_Call(Stmt: TCallStmt);
@@ -3213,9 +2672,7 @@ var
   Op: TBaseOp;
 begin
   Op := EmitExpr(Stmt.CallExpr);
-  // op 可能是一个Symbol
-  if (Op <> nil)
-    and (Op.OpCode in [opcCall, opcCallSpecial, opcCallBuiltin]) then
+  if (Op <> nil) and (Op.OpCode in [opcCall, opcCallSpecial, opcCallBuiltin]) then
   begin
     Cmd := CreateCmd(TCallCmd, Stmt.Coord);
     TCallCmd(Cmd).CallOp := TBinaryOp(Op);
@@ -3224,74 +2681,6 @@ begin
 end;
 
 procedure TCodePack.SetupStmt_Case(Stmt: TCaseStmt);
-  {
-  function CreateCaseValueAsg(V: TVariable; CaseValue: TExpr): TAssignmentStmt;
-  begin
-    Result := TAssignmentStmt(CreateNode(TAssignmentStmt));
-    Result.Coord := CaseValue.Coord;
-    Result.Left := TExpr(CreateNode(TSymbolExpr));
-    Result.Right := CaseValue.Expr;
-    with TSymbolExpr(Result.Left) do
-    begin
-      Coord := Stmt.Expr.Coord;
-      OpCode := opSYMBOL;
-      Reference := V;
-    end
-  end;
-
-  function CreateCompare(r1: Int64; v: TVariable): TBinaryExpr;
-  begin
-    Result := TBinaryExpr(CreateNode(TBinaryExpr));
-    Result.OpCode := opEQ;
-    Result.Left := CreateNode(TSymbolExpr);
-    Result.Right := CreateNode(TConstExpr);
-  end;
-
-  function CaseSelectorToIfStmt(Stmt: TCaseStmt; Sel: TCaseSelector): TIfStmt;
-  var
-    i: Integer;
-    r1, r2: Int64;
-  begin
-    Result := TIfStmt(CreateNode(TIfStmt));
-    for i := 0 to Sel.Count - 1 do
-    begin
-
-    end;
-  end;
-
-  procedure CaseStmtToIfStmt(Stmt: TCaseStmt);
-  var
-    i, j: Integer;
-    r1, r2: Int64;
-    Sel: TCaseSelector;
-    IfStmt: TIfStmt;
-    AsgStmt: TAssignmentStmt;
-    CmpEx: TBinaryExpr;
-    V: TVariable;
-  begin
-    V := Stmt.Expr.GetVariableSymbol;
-    if V = nil then
-    begin
-      V := AddVar(Stmt.Expr.Typ);
-      AsgStmt := CreateCaseValueAsg(V, Stmt.Expr);
-      SetupStmt(AsgStmt);
-    end;
-
-    for i := 0 to Stmt.Count - 1 do
-    begin
-      Sel := Stmt.Selectors[i];
-      for j := 0 to Sel.Count - 1 do
-      begin
-        r1 := Sel.Values[j].Start;
-        r2 := Sel.Values[j].Stop;
-        if r1 = r2 then
-          CmpEx := CreateCompare(r1, V)
-        else
-          CmdEx := CreateCompareRange(r1, r2, V);
-      end;
-    end;
-  end;
-       }
 
   function CreateCaseValAsgCmd(V: TVariable; E: TExpr): TAssignCmd;
   begin
@@ -3300,7 +2689,7 @@ procedure TCodePack.SetupStmt_Case(Stmt: TCaseStmt);
     Result.Right := EmitExpr(E);
   end;
 
-  function CreateCompareOp(V: TVariable; R: Int64; const Coord: TAstNodeCoord): TBinaryOp;
+  function CreateCompareOp(V: TVariable; R: int64; const Coord: TAstNodeCoord): TBinaryOp;
   begin
     Result := TBinaryOp(CreateBinaryOp(opcEQ, Coord));
     Result.Left := CreateSymbolOp(V, Coord);
@@ -3328,7 +2717,7 @@ procedure TCodePack.SetupStmt_Case(Stmt: TCaseStmt);
   function CaseSelToIfCmd(V: TVariable; Sel: TCaseSelector): TJumpCmd;
   var
     OpL, OpR: TBinaryOp;
-    i: Integer;
+    i: integer;
   begin
     Assert(Sel.Count > 0);
     OpL := RangeToCompareOp(V, Sel.Values[0]);
@@ -3346,7 +2735,7 @@ procedure TCodePack.SetupStmt_Case(Stmt: TCaseStmt);
 
   procedure CaseStmtToIfStmt(Stmt: TCaseStmt);
   var
-    i: Integer;
+    i: integer;
     V: TVariable;
     Cmd: TCmd;
     LbPre, LbTrue, LbFalse, LbEnd: string;
@@ -3358,11 +2747,9 @@ procedure TCodePack.SetupStmt_Case(Stmt: TCaseStmt);
       Cmd := CreateCaseValAsgCmd(V, Stmt.Expr);
       AddCmd(Cmd);
     end;
-
     Inc(FLevelID);
     LbPre := Format('case%d_', [FLevelID]);
     LbEnd := LbPre + 'end';
-
     for i := 0 to Stmt.Count - 1 do
     begin
       LbTrue := Format('%s%d_true', [LbPre, i + 1]);
@@ -3385,37 +2772,30 @@ procedure TCodePack.SetupStmt_Case(Stmt: TCaseStmt);
 
 var
   Cmd: TSwitchCmd;
-  i, j: Integer;
-  k: Int64;
+  i, j: integer;
+  k: int64;
   Sel: TCaseSelector;
   LbPre, LbSel, LbEnd: string;
 begin
-  // 值太多，转为if语句。
-  // 这处判断太简单,需要优化
   if Stmt.TotalValueCount > 10 then
   begin
     CaseStmtToIfStmt(Stmt);
     Exit;
   end;
-
   Cmd := TSwitchCmd(CreateCmd(TSwitchCmd, Stmt.Coord));
   Cmd.Value := EmitExpr(Stmt.Expr);
   AddCmd(Cmd);
-
   Inc(FLevelID);
   LbPre := Format('case%d_', [FLevelID]);
   LbEnd := Format('case%d_end', [FLevelID]);
-
   EmitGotoCmd(LbEnd, Stmt.Coord);
   for i := 0 to Stmt.Count - 1 do
   begin
     Sel := Stmt.Selectors[i];
     LbSel := Format('%s%d', [LbPre, i + 1]);
     EmitMarkCmd(LbSel, Sel.Stmt.Coord);
-
     SetupStmt(Sel.Stmt);
     EmitGotoCmd(LbEnd, Sel.Stmt.Coord);
-
     for j := 0 to Sel.Count - 1 do
     begin
       k := Sel.Values[j].Start;
@@ -3426,7 +2806,6 @@ begin
       end;
     end;
   end;
-
   if Stmt.Default <> nil then
   begin
     LbSel := Format('%s%d', [LbPre, 0]);
@@ -3437,13 +2816,12 @@ begin
   end
   else
     Cmd.OtherwiseTarget := LbEnd;
-
   EmitMarkCmd(LbEnd, Stmt.Coord);
 end;
 
 procedure TCodePack.SetupStmt_For(Stmt: TForStmt);
 
-  procedure AddForCompare(CtrlV, StopV: TSymbolOp; const BrLab: string; IsDown: Boolean);
+  procedure AddForCompare(CtrlV, StopV: TSymbolOp; const BrLab: string; IsDown: boolean);
   var
     Jump: TJumpCmd;
     CmpExpr: TBinaryOp;
@@ -3452,40 +2830,36 @@ procedure TCodePack.SetupStmt_For(Stmt: TForStmt);
       CmpExpr := CreateBinaryOp(opcGE, StopV.Coord)
     else
       CmpExpr := CreateBinaryOp(opcLE, StopV.Coord);
-
     CmpExpr.Left := CreateSymbolOp(CtrlV.Reference, CtrlV.Coord);
     CmpExpr.Right := CreateSymbolOp(StopV.Reference, StopV.Coord);
     CmpExpr.Typ := FContext.FBooleanType;
-
     Jump := TJumpCmd(CreateCmd(TJumpCmd, StopV.Coord));
     Jump.Condition := CmpExpr;
     Jump.TrueTarget := LabelStr('forloop');
     Jump.FalseTarget := BrLab;
     AddCmd(Jump);
-
     EmitMarkCmd(Jump.TrueTarget, Jump.Coord);
   end;
 
-  procedure AddInc(CtrlV: TSymbolOp; IsDown: Boolean);
+  procedure AddInc(CtrlV: TSymbolOp; IsDown: boolean);
   var
     Op: TBinaryOp;
     IncProc: TSymbol;
     S: TCallCmd;
-    Delta: Integer;
+    Delta: integer;
   begin
     Op := CreateBinaryOp(opcCALL, CtrlV.Coord);
-
     IncProc := FContext.FSystemUnit.FindSymbol('inc');
     Assert(IncProc <> nil);
     Op.Left := CreateSymbolOp(IncProc, CtrlV.Coord);
     Op.Right := CreateListOp(CtrlV.Coord);
     TListOp(Op.Right).Add(CreateSymbolOp(CtrlV.Reference, CtrlV.Coord));
     if IsDown then
-      Delta := -1 else
+      Delta := -1
+    else
       Delta := 1;
     TListOp(Op.Right).Add(CreateConstOp(CtrlV.Coord, Delta));
     Op.Typ := FContext.FUntype;
-
     S := TCallCmd(CreateCmd(TCallCmd, Op.Coord));
     S.CallOp := Op;
     AddCmd(S);
@@ -3494,73 +2868,37 @@ procedure TCodePack.SetupStmt_For(Stmt: TForStmt);
 var
   AsgStmt: TAssignCmd;
   CtrlV, StopV: TSymbolOp;
-  OldIndex: Integer;
+  OldIndex: integer;
   LbPre, LbStart, LbBr, LbCont, OldBr, OldCont: string;
 begin
   Inc(FLevelID);
   LbPre := Format('for%d', [FLevelID]);
-
   LbStart := LbPre + '.begin';
   LbBr := LbPre + '.br';
   LbCont := LbPre + '.cont';
-  {
-    for i := start_expr to stop_expr do
-    begin
-      if i > 10 then break;
-      if i < 10 then continue;
-    end;
-
-    ==>
-
-    i := start_expr;
-    stopv := stop_expr;
-  for_start:
-    jumpfalse i <= stopv, for_br
-      jumptrue i > 10, for_br;
-      jumptrue i < 10, for_cont;
-  for_cont:
-    inc(i);
-    jump for_start;
-  for_br:
-  }
-
   CtrlV := CreateSymbolOp(Stmt.Value, Stmt.Coord);
   StopV := CreateSymbolOp(Self.AddVar(CtrlV.Typ), Stmt.Stop.Coord);
   AsgStmt := TAssignCmd(CreateCmd(TAssignCmd, Stmt.Start.Coord));
   AsgStmt.Left := CtrlV;
   AsgStmt.Right := EmitExpr(Stmt.Start);
   AddCmd(AsgStmt);
-
   AsgStmt := TAssignCmd(CreateCmd(TAssignCmd, StopV.Coord));
   AsgStmt.Left := StopV;
   AsgStmt.Right := EmitExpr(Stmt.Stop);
   AddCmd(AsgStmt);
-
-  // label start:
   EmitMarkCmd(LbStart, Stmt.Coord);
-
-  // compare statement
   AddForCompare(CtrlV, StopV, LbBr, stmt.Down);
-
   OldBr := FBreakLabel;
   OldCont := FContinueLabel;
   OldIndex := FCleanupIndex;
   FBreakLabel := LbBr;
   FContinueLabel := LbCont;
   FCleanupIndex := FCleanupStack.Count;
-
-  // for statement's body
   SetupStmt(Stmt.Stmt);
-
-  // Inc ctrl var, then jump to label start
   EmitMarkCmd(LbCont, Stmt.Coord);
-
   AddInc(CtrlV, stmt.Down);
   EmitGotoCmd(LbStart, Stmt.Coord);
-
-  // 这是Break用的标号
   EmitMarkCmd(LbBr, Stmt.Coord);
-
   FBreakLabel := OldBr;
   FContinueLabel := OldCont;
   FCleanupIndex := OldIndex;
@@ -3574,26 +2912,20 @@ var
 begin
   Inc(FLevelID);
   lbPre := Format('if%d', [FLevelID]);
-
   E := EmitExpr(Stmt.Value);
-
   S := TJumpCmd(CreateCmd(TJumpCmd, Stmt.Coord));
   S.Condition := E;
   S.TrueTarget := lbPre + '.true';
   S.FalseTarget := lbPre + '.false';
   AddCmd(S);
   EmitMarkCmd(S.TrueTarget, Stmt.Coord);
-
   SetupStmt(Stmt.TrueStmt);
-
   if Stmt.FalseStmt <> nil then
   begin
     lbEnd := lbPre + '.end';
     EmitGotoCmd(lbEnd, Stmt.Coord);
   end;
-
   EmitMarkCmd(S.FalseTarget, Stmt.Coord);
-
   if Stmt.FalseStmt <> nil then
   begin
     SetupStmt(Stmt.FalseStmt);
@@ -3625,34 +2957,26 @@ procedure TCodePack.SetupStmt_Repeat(Stmt: TRepeatStmt);
 var
   Jump: TJumpCmd;
   OldBr, OldCont, LbStart, LbStop, LbPre: string;
-  OldIndex: Integer;
+  OldIndex: integer;
 begin
   Inc(FLevelID);
   LbPre := Format('repeat%d', [FLevelID]);
   LbStart := lbPre + '.begin';
   LbStop := lbPre + '.end';
-
   EmitMarkCmd(LbStart, Stmt.Coord);
-
   OldBr := FBreakLabel;
   OldCont := FContinueLabel;
   OldIndex := FCleanupIndex;
   FBreakLabel := LbStop;
   FContinueLabel := LbStart;
   FCleanupIndex := FCleanupStack.Count;
-
-  // Loop body
   SetupStmt(Stmt.Stmt);
-
-  // Until statement
   Jump := TJumpCmd(CreateCmd(TJumpCmd, Stmt.Coord));
   Jump.Condition := EmitExpr(Stmt.Condition);
   Jump.TrueTarget := LbStop;
   Jump.FalseTarget := LbStart;
   AddCmd(Jump);
-
   EmitMarkCmd(LbStop, Stmt.Coord);
-
   FBreakLabel := OldBr;
   FContinueLabel := OldCont;
   FCleanupIndex := OldIndex;
@@ -3674,8 +2998,7 @@ procedure TCodePack.SetupStmt_Try(Stmt: TTryStmt);
     R.Reference := Handler.ExceptVar.VarType;
     R.Typ := Handler.ExceptVar.VarType;
     R.OpCode := opSYMBOL;
-
-    E.OpCode:= opIS;
+    E.OpCode := opIS;
     E.Left := L;
     E.Right := R;
     E.Typ := FContext.FTrueConst.ConstType;
@@ -3689,21 +3012,18 @@ procedure TCodePack.SetupStmt_Try(Stmt: TTryStmt);
   begin
     Result := TCompoundStmt(CreateNode(TCompoundStmt));
     S := TAssignmentStmt(CreateNode(TAssignmentStmt));
-    // 构造: exceptvar := V
     L := TSymbolExpr(CreateNode(TSymbolExpr));
     R := TSymbolExpr(CreateNode(TSymbolExpr));
-
     L.Reference := Handler.ExceptVar;
     L.Typ := Handler.ExceptVar.VarType;
     L.OpCode := opSYMBOL;
     R.Reference := V;
     R.Typ := V.VarType;
     R.OpCode := opSYMBOL;
-
     S.Left := L;
     S.Right := R;
     Result.Statements.Add(S);
-    if Handler.Stmt <> nil then // Stmt may be nil
+    if Handler.Stmt <> nil then
       Result.Statements.Add(Handler.Stmt);
   end;
 
@@ -3714,7 +3034,7 @@ procedure TCodePack.SetupStmt_Try(Stmt: TTryStmt);
 
   function MakeExceptStmt(ExBlock: TExceptBlock): TStatement;
   var
-    i: Integer;
+    i: integer;
     S: array of TIfStmt;
     Handler: TExceptHandler;
   begin
@@ -3723,44 +3043,28 @@ procedure TCodePack.SetupStmt_Try(Stmt: TTryStmt);
       Result := ExBlock.Default;
       Exit;
     end;
-
     SetLength(S, ExBlock.Count);
-    for i := 0 to ExBlock.Count-1 do
+    for i := 0 to ExBlock.Count - 1 do
     begin
       S[i] := TIfStmt(CreateNode(TIfStmt));
       Handler := ExBlock.ExceptHandlers[i];
       Inc(FVarID);
       with Handler.ExceptVar do
       begin
-        // 改名避免冲突
         Name := '$' + Name + IntToStr(FVarID);
         Parent := nil;
         Level := FCurFunc.Level;
         Include(Attr, saUsed);
       end;
-      //FCurFunc.LocalSymbols.Add(Handler.ExceptVar);
       FCurCode.Vars.Add(Handler.ExceptVar);
       S[i].Value := MakeIsExceptExpr(Handler, FExceptVar);
       S[i].TrueStmt := MakeOnExceptStmt(Handler, FExceptVar);
     end;
-
-    // 把if语句串起来, 形成：
-    // if $e is EMyError then
-    //   domyerror($e)
-    // else if $e is EFailed then
-    //   dofailed($e)
-    // else
-    //   doelse;
     for i := 0 to ExBlock.Count - 2 do
-    begin
       S[i].FalseStmt := S[i + 1];
-    end;
     S[Length(S) - 1].FalseStmt := ExBlock.Default;
     if ExBlock.Default = nil then
-    begin
-      // 抛出
       S[Length(S) - 1].FalseStmt := MakeReraiseStmt;
-    end;
     Result := S[0];
   end;
 
@@ -3779,16 +3083,13 @@ procedure TCodePack.SetupStmt_Try(Stmt: TTryStmt);
     Arg.Reference := Self.FExceptVar;
     Arg.Typ := Self.FexceptVar.VarType;
     Arg.OpCode := opSYMBOL;
-
     R := TListExpr(CreateNode(TListExpr));
     R.Add(Arg);
     R.Typ := FContext.FUntype;
-
     Call.Left := L;
     Call.Right := R;
     Call.OpCode := opCALL;
     Call.Typ := FContext.FUntype;
-
     Result := TCallStmt(CreateNode(TCallStmt));
     Result.CallExpr := Call;
   end;
@@ -3803,27 +3104,12 @@ procedure TCodePack.SetupStmt_Try(Stmt: TTryStmt);
     SetupStmt(S);
   end;
 
-{  procedure EmitExceptCmds(ExBlock: TExceptBlock);
+  procedure AttachExceptCmds(List: TFPList; Start: integer);
   var
-    S: TStatement;
-    C: TCompoundStmt;
-  begin
-    S := MakeExceptStmt(ExBlock);
-    C := TCompoundStmt(CreateNode(TCompoundStmt));
-    if S <> nil then
-      C.Statements.Add(S);
-    C.Statements.Add(EmitCallFreeStmt);
-    SetupStmt(C);
-  end;}
-
-  procedure AttachExceptCmds(List: TList; Start: Integer);
-  var
-    i: Integer;
+    i: integer;
   begin
     for i := Start to FCurCode.Cmds.Count - 1 do
-    begin
       List.Add(FCurCode.Cmds[i]);
-    end;
     for i := FCurCode.Cmds.Count - 1 downto Start do
       FCurCode.Cmds.Delete(i);
   end;
@@ -3831,65 +3117,52 @@ procedure TCodePack.SetupStmt_Try(Stmt: TTryStmt);
 var
   LFunc: TFunction;
   LIns: TCmd;
-  Start: Integer;
+  Start: integer;
   OldVar: TVariable;
 begin
-  // finally 中不可以有直接的 Break Continue Exit ，所以可以单独一个函数
   if Stmt.FinallyStmt <> nil then
   begin
     CreateExPtrVar;
-    // 创建一个函数，把 finally 代码移至这个函数。
-    // 因为finally块需要在 Exit,Break,continue中调用，做成函数比较方便
     LFunc := CreateFunc;
     LFunc.Parent := FCurFunc;
     LFunc.Level := FCurFunc.Level + 1;
     LFunc.Attr := [saInternal];
-
     Inc(FFuncID);
     LFunc.Name := FCurFunc.Name + 'fin.' + IntToStr(FFuncID);
     LFunc.StartStmt := Stmt.FinallyStmt;
     FCurCode.Funcs.Add(LFunc);
     FCleanupStack.Add(LFunc);
-
     LIns := CreateCmd(TCleanupCmd, Stmt.FinallyStmt.Coord);
     TCleanupCmd(LIns).CleanupProc := LFunc;
     AddCmd(LIns);
   end;
-
-  // 要考虑到如果在 except 中有个 Exit Break Continue ，
-  // 如何实现跳转
   if Stmt.ExceptBlock <> nil then
   begin
     Inc(FExceptCount);
     LIns := CreateCmd(THandleExceptCmd, Stmt.Coord);
     AddCmd(LIns);
-
     CreateExPtrVar;
     OldVar := FExceptVar;
     FExceptVar := CreateExVar;
-
-    if FExceptVarStack = nil then FExceptVarStack := TList.Create;
+    if FExceptVarStack = nil then
+      FExceptVarStack := TFPList.Create;
     FExceptVarStack.Add(FExceptVar);
-
     try
       THandleExceptCmd(LIns).ExceptVar := FExceptVar.Name;
       THandleExceptCmd(LIns).Level := FExceptCount;
-
       Start := FCurCode.Cmds.Count;
       EmitExceptCmds(Stmt.ExceptBlock);
       AttachExceptCmds(THandleExceptCmd(LIns).Cmds, Start);
     finally
       FExceptVar := OldVar;
-      FExceptVarStack.Delete(FExceptVarStack.Count-1);
+      FExceptVarStack.Delete(FExceptVarStack.Count - 1);
     end;
   end;
-
   SetupStmt(Stmt.Stmt);
-
   if Stmt.FinallyStmt <> nil then
   begin
     EmitCallCmd(TFunctionDecl(FCleanupStack.Last), Stmt.FinallyStmt.Coord, []);
-    FCleanupStack.Delete(FCleanupStack.Count-1);
+    FCleanupStack.Delete(FCleanupStack.Count - 1);
     LIns := CreateCmd(TLeaveBlockCmd, Stmt.FinallyStmt.Coord);
     AddCmd(LIns);
   end;
@@ -3905,59 +3178,45 @@ procedure TCodePack.SetupStmt_While(Stmt: TWhileStmt);
 var
   Jump: TJumpCmd;
   OldBr, OldCont, LbStart, LbStop, LbPre: string;
-  OldIndex: Integer;
+  OldIndex: integer;
 begin
   Inc(FLevelID);
   LbPre := Format('while%d', [FLevelID]);
-
   LbStart := LbPre + '.begin';
   LbStop := LbPre + '.end';
-
   EmitMarkCmd(LbStart, Stmt.Coord);
-
   Jump := TJumpCmd(CreateCmd(TJumpCmd, Stmt.Coord));
   Jump.Condition := EmitExpr(Stmt.Condition);
   Jump.TrueTarget := LbPre + '.body';
   Jump.FalseTarget := LbStop;
   AddCmd(Jump);
-
   EmitMarkCmd(Jump.TrueTarget, Stmt.Coord);
-
-  // loop body
   OldBr := FBreakLabel;
   OldCont := FContinueLabel;
   OldIndex := FCleanupIndex;
   FBreakLabel := LbStop;
   FContinueLabel := LbStart;
   FCleanupIndex := FCleanupStack.Count;
-
   SetupStmt(Stmt.Stmt);
-
   EmitMarkCmd(LbStop, Stmt.Coord);
-
   FBreakLabel := OldBr;
   FContinueLabel := OldCont;
   FCleanupIndex := OldIndex;
 end;
 
-{ TCode }
-
 constructor TCode.Create;
 begin
-  Cmds := TList.Create;
-  Vars := TList.Create;
-//  Consts := THashTable.Create(100, True);
-  Funcs := TList.Create;
+  Cmds := TFPList.Create;
+  Vars := TFPList.Create;
+  Funcs := TFPList.Create;
 end;
 
 destructor TCode.Destroy;
 begin
   Cmds.Free;
   Vars.Free;
-//  Consts.Free;
   Funcs.Free;
-  inherited;
+  inherited Destroy;
 end;
 
 end.
-
