@@ -10,20 +10,37 @@ interface
 uses SysUtils, ast;
 
 procedure GetFileTimeStamp(const S: string; out TimeStamp: TFileTimeStamp); overload;
-procedure GetFileTimeStamp(Handle: THandle; out TimeStamp: TFileTimeStamp); overload;
+// procedure GetFileTimeStamp(Handle: THandle; out TimeStamp: TFileTimeStamp); overload;
 
 implementation
-
-uses Windows;
 
 {$warnings off}
 {$hints off}
 
 procedure ToTimeStamp(const T: TSystemTime; out TimeStamp: TFileTimeStamp);
 begin
-  TimeStamp.Date := T.wYear * 10000 + T.wMonth * 100 + T.wDay;
-  TimeStamp.Time := T.wHour * 10000000 + T.wMinute * 100000 + T.wSecond * 1000 + T.wMilliseconds;
+  TimeStamp.Date := T.Year * 10000 + T.Month * 100 + T.Day;
+  TimeStamp.Time := T.Hour * 10000000 + T.Minute * 100000 + T.Second * 1000 + T.Millisecond;
 end;
+
+procedure GetFileTimeStamp(const S: string; out TimeStamp: TFileTimeStamp);
+var
+  fileok : Boolean;
+  datetime : TDateTime;
+  systime : TSystemTime;
+  filedata : TSearchRec;
+begin
+  fileok := FindFirst(S, faAnyFile, filedata) = 0;
+  if fileok then
+  begin
+    datetime := FileDateToDateTime(filedata.Time);
+    DateTimeToSystemTime(datetime, systime);
+    ToTimeStamp(systime, TimeStamp);
+    FindClose(filedata);
+  end;
+end;
+
+(* *** Previous version, Windows only. Delete after cross platform implemented.
 
 procedure GetFileTimeStamp(const S: string; out TimeStamp: TFileTimeStamp);
 var
@@ -58,5 +75,6 @@ begin
     ToTimeStamp(sysT, TimeStamp);
   end;
 end;
+*)
 
 end.
