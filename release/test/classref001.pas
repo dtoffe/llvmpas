@@ -1,6 +1,6 @@
 (*
 <test>
-  <description>传递类引用给参数</description>
+  <description>Pass class references to parameters</description>
   <command>%%pc %%source </command>
   <expect>
     <output action="contains"></output>

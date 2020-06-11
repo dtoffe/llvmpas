@@ -1,6 +1,6 @@
 ﻿(*
 <test>
-  <description>case语句,多标签</description>
+  <description>case statement, multiple labels</description>
   <command>%%pc -E %%source </command>
   <expect>
     <exitcode>0</exitcode>

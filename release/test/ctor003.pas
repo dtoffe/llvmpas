@@ -1,6 +1,6 @@
 (*
 <test>
-  <description>以类引用调用构造函数</description>
+  <description>Call constructor with class reference</description>
   <command>%%pc -dump-code %%source </command>
   <expect>
     <output action="contains">IsClassrefPrefix=true</output>

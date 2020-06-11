@@ -1,6 +1,6 @@
 (*
 <test>
-  <description>类引用使用虚函数</description>
+  <description>Class references use virtual functions</description>
   <command>%%pc %%source </command>
   <expect>
     <output action="contains"></output>

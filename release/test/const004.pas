@@ -1,6 +1,6 @@
 (*
 <test>
-  <description>地址常量</description>
+  <description>Address constant</description>
   <command>%%pc %%source -E </command>
   <expect>
     <exitcode>0</exitcode>

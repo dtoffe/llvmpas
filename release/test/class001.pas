@@ -1,6 +1,6 @@
 (*
 <test>
-  <description>class基本检查</description>
+  <description>class basic inspection</description>
   <command>%%pc %%source -E </command>
   <expect>
     <exitcode>0</exitcode>

@@ -1,6 +1,6 @@
 ﻿(*
 <test>
-  <description>检查构造函数。以实例调用Create，是否正确地传递标志 -1</description>
+  <description>Check the constructor. Call Create with an instance, whether the flag is passed correctly -1</description>
   <command>%%pc %%source </command>
   <expect>
     <exitcode>0</exitcode>

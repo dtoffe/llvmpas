@@ -1,7 +1,7 @@
 (*
 <test>
-  <description>method pointer. (obj.getobj.docheck tranlate obj.getobj to call)
-    obj.getobj.docheck这个表达式中的obj.getobj需要转成函数调用
+  <description>
+    The expression obj.getobj in obj.getobj.docheck needs to be converted into a function call
   </description>
   <command>%%pc -E %%source </command>
   <expect>

@@ -1,8 +1,7 @@
 (*
 <test>
   <description>
-    exception handle.
-	异常处理块中的 try finally
+    Try finally in the exception handling block
   </description>
   <command>%%pc %%source </command>
   <expect>

@@ -1,6 +1,6 @@
 (*
 <test>
-  <description>方法指针比较</description>
+  <description>Method pointer comparison</description>
   <command>%%pc -E %%source </command>
   <expect>
     <exitcode>0</exitcode>

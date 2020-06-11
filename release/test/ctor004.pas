@@ -1,6 +1,6 @@
 (*
 <test>
-  <description>无构造函数的类生成并赋值给同一类型的变量</description>
+  <description>Classes without constructors are generated and assigned to variables of the same type</description>
   <command>%%pc -E %%source </command>
   <expect>
     <exitcode>0</exitcode>

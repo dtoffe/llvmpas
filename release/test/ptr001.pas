@@ -1,7 +1,7 @@
 (*
 <test>
   <description>
-    pointer赋值的bug
+    pointer assignment bug
   </description>
   <command>%%pc -E %%source </command>
   <expect>

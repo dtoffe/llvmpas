@@ -1,6 +1,6 @@
 (*
 <test>
-  <description>常量检查(real to/from int转型错误)</description>
+  <description>Constant check (real to/from int conversion error)</description>
   <command>%%pc %%source -E </command>
   <expect>
     <output action="contains">(1218)</output>

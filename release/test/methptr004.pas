@@ -1,7 +1,7 @@
 (*
 <test>
   <description>
-    getobj.docheck这个表达式中的getobj需要转成函数调用。
+    getobj.docheck The getobj in this expression needs to be turned into a function call.
 	(under mode delphi)
   </description>
   <command>%%pc -E %%source </command>

@@ -1,6 +1,6 @@
 (*
 <test>
-  <description>field基本检查</description>
+  <description>field basic check</description>
   <command>%%pc %%source -E </command>
   <expect>
     <exitcode>0</exitcode>

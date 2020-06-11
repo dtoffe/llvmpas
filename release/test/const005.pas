@@ -1,6 +1,6 @@
 (*
 <test>
-  <description>真常量不允许指针</description>
+  <description>True constants do not allow pointers</description>
   <command>%%pc %%source -E </command>
   <expect>
     <output action="contains">(1301)</output>

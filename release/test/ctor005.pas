@@ -1,6 +1,6 @@
 (*
 <test>
-  <description>无构造函数的类生成并传给同一类型的参数</description>
+  <description>Classes without constructors are generated and passed to the same type of parameters</description>
   <command>%%pc -E %%source </command>
   <expect>
     <exitcode>0</exitcode>

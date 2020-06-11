@@ -1,9 +1,12 @@
-﻿
-一些细节：
+﻿-- (Note from dtoffe: This is a rough Google-translation from the original Chinese text)
 
-一、关于构造函数和析构函数的处理
+- Some details:
 
-在Object Pascal中，class的构造函数和析构函数要传入额外的参数：一个是class类型（VMT指针），一个是标记参数，用于指示是否创建实例等状态。比如：
+1). About the processing (or handling) of the constructor and destructor
+
+In Object Pascal，the class' constructor and destructor have to pass in additional parameters:
+One is the class type (VMT pointer)，another is the tag parameter, which is used to indicate
+whether to create an instance, etc. such as:
 
 type
 	TMyObj = class
@@ -11,16 +14,31 @@ type
 		constructor Create(a: Integer);
 	end;
 
-这个Create其实真的原型是这样的：
+This Create is actually like this prototype:
+
 void* Create(void* pVmt, char flag, int a)
 
-flag如果等于0，则表示Create不是最外围的，一些初始化就不必做了，此时pVmt是已经创建的实例。如果flag小于0，表示pVmt是已经创建的实例。如果flag大于0，pVmt是VMT指针。
+If the flag is equal to 0，it means that Create is not the most peripheral, and some
+initialization does not have to be done, at this time pVmt is an instance that has been
+created. If flag is less than 0，indicates that pVmt is an instance that has been created.
+If flag is greater than 0, pVmt is the VMT pointer.
 
-在Create之中，首先判断flag是否等于0，如果是，绕过初始化和AfterConstruction，因为这是外围构造函数的事。如果flag大于0，则要先分配内存以及初始化，以及安装异常处理。如果小于0，则只有安装异常处理这一步，请查看ClassCreate函数。
+In Create, first determine whether the flag is equal to 0, if it is, bypass initialization
+and AfterConstruction, because this is the peripheral constructor. If the flag is greater
+than 0, you must first allocate memory and initialization, and install exception handling.
+If it is less than 0, only the installation exception handling step, please check the
+ClassCreate function.
 
-在初始化和执行Create之中的代码之后，最外围的构造函数要调用AfterConstruction，并撤销异常处理。这个异常处理保证了在构造之时发生异常，能及时释放内存。（此处的设计十分精妙，所有构造函数都共享一段异常处理，效率和程序大小都兼顾了）
+After initializing and executing the code in Create, the outermost constructor calls
+AfterConstruction and undoes exception handling. This exception handling ensures that an
+exception occurs during construction and can release memory in a timely manner. (The design
+here is very subtle, all constructors share an exception handling, efficiency and program
+size are taken into account)
 
-如果这件事用LLVM来完成，有点复杂，因为LLVM的异常处理机制没办法在某一处安装，然后在另一处撤销。只能在同一函数。因此，只能做一些变通。这里用C++来描述改进后的方案：
+If this is done with LLVM, it is a bit complicated, because the exception handling mechanism
+of LLVM cannot be installed in one place and then canceled in another place. Only in the same
+function. Therefore, only some modifications can be made. C++ is used here to describe the
+improved scheme:
 
 void* Create(void* pVmt, char flag, int a)
 {
@@ -48,9 +66,13 @@ void* Create(void* pVmt, char flag, int a)
 	}
 }
 
-这样每个构造函数必须有try catch，这将导致程序变大。
+In this way, each constructor must have a try catch, which will cause the program to
+become larger.
 
-对于析构函数也额外的参数传入。一个是实例指针，一个是标记参数，用于指示是否最外围析构函数。如果是最外围的，进入时要调用BeforeDestruction，退时之前要调用ClassDestroy；
+For the destructor, additional parameters are passed in. One is the instance pointer,
+and the other is the tag parameter, used to indicate whether the outermost destructor
+is used. If it is the most peripheral, BeforeDestruction is called when entering, and
+ClassDestroy is called before returning;
 
 void Destroy(void* Self, char outterMost)
 {
@@ -61,15 +83,15 @@ void Destroy(void* Self, char outterMost)
 		FreeInstance(Self);
 }
 
-二、内嵌函数
+Second, the embedded function
 
 
-三、字符串、Variant、接口
+Three, string, Variant, interface
 
 
-四、异常处理
+Four, exception handling
 
-LLVM异常处理一般形式：
+The general form of LLVM exception handling:
 
   %.ex.addr = alloca i8*
   
@@ -87,31 +109,37 @@ lpad:
   store i8* %3, i8** %.ex.addr
   br label lpad.body
 lpad.body:
-  ; 做某些处理
+  ; Do some processing
   
-  ; 异常已经处理完成
+  ; The exception has been processed
   tail call void @__cxa_end_catch()
   br label %try.leave
 
-  ; 如果没有得到处理，需要向上传播，则使用resume，把流程交给C++异常处理
+  ; If it is not handled and needs to be propagated upwards, use resume to hand over
+  ; the process to C++ exception handling
 except.lpad.1.resume:
   resume {i8*, i32} %1
   unreachable
 
 try.leave:
 
-以上是只有一个异常处理块（一个 try except end 语句）的情况，如果在try语句之中嵌套异常，则机制略有些复杂。在内层异常得不到处理的时候，需要自己跳转到外层继续处理。不能使用resume来跳转
+The above is the case where there is only one exception handling block (a try except
+end statement). If an exception is nested in the try statement, the mechanism is a
+little more complicated. When the inner layer exception cannot be handled, you need
+to jump to the outer layer to continue processing. Can't use resume to jump
 
-如果在异常处理之中使用 try except end 或 try finally end ？
+If you use try except end or try finally end in exception handling ？
+
 try
 
 except
 	try
+
 	except
 	end;
 end;
 
-如果在异常处理这中使用Exit, Continue, Break?
+If you use Exit, Continue, Break in exception handling?
 
 for i := 0 to len - 1 do
 begin
@@ -126,8 +154,3 @@ begin
 		end;
 	end;
 end;
-
-
-
-
-

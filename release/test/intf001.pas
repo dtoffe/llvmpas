@@ -1,6 +1,6 @@
 ﻿(*
 <test>
-  <description>interface 基本检查</description>
+  <description>interface basic check</description>
   <command>%%pc %%source -E </command>
   <expect>
     <exitcode>0</exitcode>

@@ -1,7 +1,7 @@
 (*
 <test>
   <description>
-	catch块异常对象的释放
+	The release of the catch block exception object
   </description>
   <command>%%pc %%source </command>
   <expect>

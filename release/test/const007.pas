@@ -1,6 +1,6 @@
 (*
 <test>
-  <description>集合常量表达式</description>
+  <description>Set constant expression</description>
   <command>%%pc %%source -E </command>
   <expect>
     <exitcode>0</exitcode>

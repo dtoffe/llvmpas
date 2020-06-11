@@ -1,6 +1,6 @@
 (*
 <test>
-  <description>常量检查</description>
+  <description>Constant check</description>
   <command>%%pc %%source -E </command>
   <expect>
     <exitcode>0</exitcode>

@@ -2,7 +2,6 @@
 <test>
   <description>
     function pointer in delphi mode. Valid that call test2 with `show`, extend `show` to @show.
-	验证test2(show)表达式中的show扩展为@show
   </description>
   <command>%%pc -E %%source </command>
   <expect>

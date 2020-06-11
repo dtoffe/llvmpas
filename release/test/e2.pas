@@ -1,8 +1,7 @@
 (*
 <test>
   <description>
-    exception handle.
-	异常处理
+    Exception handling
   </description>
   <command>%%pc %%source </command>
   <expect>

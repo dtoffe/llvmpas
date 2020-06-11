@@ -1,6 +1,6 @@
 (*
 <test>
-  <description>case语句</description>
+  <description>case statement</description>
   <command>%%pc -E %%source </command>
   <expect>
     <output action="contains">(1501)</output>

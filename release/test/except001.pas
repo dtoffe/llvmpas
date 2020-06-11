@@ -1,8 +1,7 @@
 (*
 <test>
   <description>
-    exception handle.
-	“Ï≥£¥¶¿Ì
+    Exception handling
   </description>
   <command>%%pc %%source </command>
   <expect>

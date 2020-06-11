@@ -1,6 +1,6 @@
 (*
 <test>
-  <description>case语句</description>
+  <description>case statement</description>
   <command>%%pc -E %%source </command>
   <expect>
     <exitcode>0</exitcode>
