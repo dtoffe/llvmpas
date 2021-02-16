@@ -9,7 +9,6 @@ uses
   cthreads,
  {$ENDIF}
  {$ENDIF}
-  JMem,
   Interfaces, // this includes the LCL widgetset
   Forms,
   Main,

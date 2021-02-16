@@ -1,4 +1,4 @@
-# LLVMPas : An LLVM to Object Pascal compiler
+# LLVMPas : An Object Pascal compiler with LLVM backend.
 
 ## Command Line
 

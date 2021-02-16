@@ -5,7 +5,7 @@ unit run;
 interface
 
 uses
-  Classes, SysUtils, Windows;
+  Classes, SysUtils{, Windows};
 type
 
   ETestItemError = class(Exception);
@@ -28,7 +28,7 @@ implementation
 uses DOM, XMLRead;
 
 (*
-格式：
+format：
 <test>
   <command>%%pc %%source </command>
   <expect>
@@ -142,7 +142,7 @@ begin
   try
     S := ExtractComment;
   except
-    raise ETestItemError.Create('读取测试信息失败。');
+    raise ETestItemError.Create('Failed to read test information. ');
   end;
 
   if Length(S) > 0 then
@@ -150,11 +150,11 @@ begin
     try
       Result := LoadTestItem(S);
     except
-      raise ETestItemError.Create('分析测试信息失败。');
+      raise ETestItemError.Create('Failed to analyze test information. ');
     end;
   end
   else
-    raise ETestItemError.Create('无测试信息。');
+    raise ETestItemError.Create('No test information. ');
 end;
 
 procedure CheckResult(b: Boolean);
@@ -197,7 +197,8 @@ var
 begin
   Result := '';
   FillChar(sa, SizeOf(sa), 0);
-  // 设置允许继承，否则在NT和2000下无法取得输出结果
+  // Set to allow inheritance, otherwise the output result cannot be obtained
+  // under NT and 2000.
   sa.nLength := SizeOf(sa);
   sa.bInheritHandle := True;
   sa.lpSecurityDescriptor := nil;
@@ -209,7 +210,8 @@ begin
   FillChar(StartInfo, SizeOf(StartInfo), 0);
   StartInfo.cb := SizeOf(StartInfo);
   StartInfo.wShowWindow := SW_HIDE;
-  //使用指定的句柄作为标准输入输出的文件句柄,使用指定的显示方式
+  // Use the specified handle as the file handle for standard input and output,
+  // and use the specified display mode.
   StartInfo.dwFlags     := STARTF_USESTDHANDLES+STARTF_USESHOWWINDOW;
   StartInfo.hStdError   := HWrite;
   StartInfo.hStdInput   := GetStdHandle(STD_INPUT_HANDLE);//HRead;

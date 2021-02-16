@@ -8,7 +8,7 @@ object MainFrm: TMainFrm
   ClientWidth = 717
   OnCreate = FormCreate
   Position = poDesktopCenter
-  LCLVersion = '1.2.6.0'
+  LCLVersion = '2.0.10.0'
   object Panel1: TPanel
     Left = 0
     Height = 161
@@ -20,34 +20,34 @@ object MainFrm: TMainFrm
     ClientWidth = 717
     TabOrder = 0
     object Label1: TLabel
-      Left = 68
-      Height = 12
-      Top = 11
-      Width = 72
+      Left = 8
+      Height = 16
+      Top = 8
+      Width = 68
       Caption = 'Source File:'
       ParentColor = False
     end
     object Label2: TLabel
       Left = 8
-      Height = 12
+      Height = 16
       Top = 35
-      Width = 132
+      Width = 134
       Caption = 'Unit Output Directory:'
       ParentColor = False
     end
     object Label3: TLabel
-      Left = 20
-      Height = 12
+      Left = 8
+      Height = 16
       Top = 83
-      Width = 120
+      Width = 113
       Caption = 'Library Directories:'
       ParentColor = False
     end
     object Label4: TLabel
-      Left = 32
-      Height = 12
+      Left = 8
+      Height = 16
       Top = 59
-      Width = 108
+      Width = 107
       Caption = 'Include Directory:'
       ParentColor = False
     end
@@ -62,7 +62,7 @@ object MainFrm: TMainFrm
     end
     object edt_SrcFile: TEdit
       Left = 152
-      Height = 25
+      Height = 28
       Top = 8
       Width = 376
       TabOrder = 0
@@ -70,7 +70,7 @@ object MainFrm: TMainFrm
     end
     object edt_UnitOutputDir: TEdit
       Left = 152
-      Height = 25
+      Height = 28
       Top = 32
       Width = 376
       TabOrder = 1
@@ -88,7 +88,7 @@ object MainFrm: TMainFrm
     end
     object edt_IncludeDir: TEdit
       Left = 152
-      Height = 25
+      Height = 28
       Top = 56
       Width = 376
       TabOrder = 2
@@ -121,21 +121,21 @@ object MainFrm: TMainFrm
       TabOrder = 7
     end
     object chkGenCode: TCheckBox
-      Left = 55
-      Height = 21
-      Top = 109
-      Width = 70
-      Caption = '生成代码'
+      Left = 8
+      Height = 23
+      Top = 104
+      Width = 113
+      Caption = 'Generate code'
       Checked = True
       State = cbChecked
       TabOrder = 8
     end
     object chkDumpAst: TCheckBox
-      Left = 55
-      Height = 21
-      Top = 135
-      Width = 68
-      Caption = '导出AST'
+      Left = 8
+      Height = 23
+      Top = 128
+      Width = 94
+      Caption = 'Export AST'
       TabOrder = 9
     end
   end
@@ -152,12 +152,12 @@ object MainFrm: TMainFrm
     object TabSheet1: TTabSheet
       Caption = 'Output'
       ClientHeight = 303
-      ClientWidth = 709
+      ClientWidth = 707
       object mmo_Output: TMemo
         Left = 0
         Height = 303
         Top = 0
-        Width = 709
+        Width = 707
         Align = alClient
         Font.CharSet = GB2312_CHARSET
         Font.Color = clWindowText

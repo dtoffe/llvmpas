@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <CONFIG>
   <ProjectOptions>
-    <Version Value="9"/>
+    <Version Value="11"/>
     <PathDelim Value="\"/>
     <General>
       <SessionStorage Value="InProjectDir"/>
@@ -14,32 +14,27 @@
     <i18n>
       <EnableI18N LFM="False"/>
     </i18n>
-    <VersionInfo>
-      <StringTable ProductVersion=""/>
-    </VersionInfo>
     <BuildModes Count="1">
       <Item1 Name="Default" Default="True"/>
     </BuildModes>
     <PublishOptions>
       <Version Value="2"/>
-      <IncludeFileFilter Value="*.(pas|pp|inc|lfm|lpr|lrs|lpi|lpk|sh|xml)"/>
-      <ExcludeFileFilter Value="*.(bak|ppu|o|so);*~;backup"/>
     </PublishOptions>
     <RunParams>
-      <local>
-        <FormatVersion Value="1"/>
-      </local>
+      <FormatVersion Value="2"/>
+      <Modes Count="1">
+        <Mode0 Name="default"/>
+      </Modes>
     </RunParams>
     <RequiredPackages Count="1">
       <Item1>
         <PackageName Value="LCL"/>
       </Item1>
     </RequiredPackages>
-    <Units Count="17">
+    <Units Count="15">
       <Unit0>
         <Filename Value="lpcw.lpr"/>
         <IsPartOfProject Value="True"/>
-        <UnitName Value="lpcw"/>
       </Unit0>
       <Unit1>
         <Filename Value="main.pas"/>
@@ -52,76 +47,55 @@
       <Unit2>
         <Filename Value="cupersist.pas"/>
         <IsPartOfProject Value="True"/>
-        <UnitName Value="cupersist"/>
       </Unit2>
       <Unit3>
-        <Filename Value="expr.inc"/>
+        <Filename Value="ast.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit3>
       <Unit4>
-        <Filename Value="ast.pas"/>
-        <IsPartOfProject Value="True"/>
-        <UnitName Value="ast"/>
-      </Unit4>
-      <Unit5>
         <Filename Value="lex.pas"/>
         <IsPartOfProject Value="True"/>
-        <UnitName Value="lex"/>
-      </Unit5>
-      <Unit6>
+      </Unit4>
+      <Unit5>
         <Filename Value="func.pas"/>
         <IsPartOfProject Value="True"/>
-        <UnitName Value="func"/>
-      </Unit6>
-      <Unit7>
+      </Unit5>
+      <Unit6>
         <Filename Value="fileutils.pas"/>
         <IsPartOfProject Value="True"/>
-        <UnitName Value="fileutils"/>
-      </Unit7>
-      <Unit8>
+      </Unit6>
+      <Unit7>
         <Filename Value="cntx.pas"/>
         <IsPartOfProject Value="True"/>
-        <UnitName Value="cntx"/>
-      </Unit8>
-      <Unit9>
+      </Unit7>
+      <Unit8>
         <Filename Value="hashtable.pas"/>
         <IsPartOfProject Value="True"/>
-        <UnitName Value="hashtable"/>
-      </Unit9>
-      <Unit10>
+      </Unit8>
+      <Unit9>
         <Filename Value="err.pas"/>
         <IsPartOfProject Value="True"/>
-        <UnitName Value="err"/>
+      </Unit9>
+      <Unit10>
+        <Filename Value="parser.pas"/>
+        <IsPartOfProject Value="True"/>
       </Unit10>
       <Unit11>
-        <Filename Value="exprh.inc"/>
+        <Filename Value="inst.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit11>
       <Unit12>
-        <Filename Value="parser.pas"/>
-        <IsPartOfProject Value="True"/>
-        <UnitName Value="parser"/>
-      </Unit12>
-      <Unit13>
-        <Filename Value="inst.pas"/>
-        <IsPartOfProject Value="True"/>
-        <UnitName Value="inst"/>
-      </Unit13>
-      <Unit14>
         <Filename Value="llvm_codegen.pas"/>
         <IsPartOfProject Value="True"/>
-        <UnitName Value="llvm_codegen"/>
-      </Unit14>
-      <Unit15>
+      </Unit12>
+      <Unit13>
         <Filename Value="llvm_codepack.pas"/>
         <IsPartOfProject Value="True"/>
-        <UnitName Value="llvm_codepack"/>
-      </Unit15>
-      <Unit16>
+      </Unit13>
+      <Unit14>
         <Filename Value="dump.pas"/>
         <IsPartOfProject Value="True"/>
-        <UnitName Value="dump"/>
-      </Unit16>
+      </Unit14>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
@@ -148,12 +122,10 @@
         <ShowHints Value="False"/>
       </Verbosity>
       <CompilerMessages>
-        <IgnoredMessages idx4022="True" idx5024="True"/>
-        <MsgFileName Value=""/>
+        <IgnoredMessages idx5024="True" idx4022="True"/>
       </CompilerMessages>
       <CustomOptions Value="-Sa
 -vq"/>
-      <CompilerPath Value="$(CompPath)"/>
     </Other>
   </CompilerOptions>
   <Debugging>
