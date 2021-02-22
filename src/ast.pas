@@ -7,8 +7,8 @@ interface
 uses Classes, SysUtils, hashtable;
 
 const
-  ROOT_VMT_OFFSET = 8;
-  ROOT_VMT_ENTRY_COUNT = 19;
+  ROOT_VMT_OFFSET = 8;  // This value is related to the design of TObject, currently TObject has 8 virtual functions
+  ROOT_VMT_ENTRY_COUNT = 19;  // Number of root VMT table entries
 
 type
   TSymString = UTF8String;
@@ -33,7 +33,8 @@ type
   TSymbolTable = class;
   TAstNodeKind = (nkSymbol, nkExpr, nkType, nkNameScope, nkModule, nkVariable, nkConstant,
     nkField, nkProperty, nkIntfProperty, nkMethod, nkMethodResolution, nkFuncParam, nkEnumElement,
-    nkFunc, nkExternalFunc, nkBuiltinFunc, nkAccessor, nkLabel, nkStmt, nkSymbolOffset);
+    nkFunc, // general procedure / function
+    nkExternalFunc, nkBuiltinFunc, nkAccessor, nkLabel, nkStmt, nkSymbolOffset);
   TAstNodeKinds = set of TAstNodeKind;
   EASTError = class(Exception);
 
@@ -55,7 +56,18 @@ type
   end;
 
   TAstNodeClass = class of TAstNode;
-  TSymbolAttribute = (saUsed, saReserved1, saInternal, saForward, saStatic, saClass, saPrimitive, saTemp);
+  TSymbolAttribute = (
+      saUsed,       // The symbol has been used
+      saReserved1,  // Keep it. (Can be renamed and reused)
+      saInternal,   // The symbol is not declared in the interface section
+      saForward,    // Temporarily indicate that the symbol is a forward declaration
+      saStatic,     // This symbol is a static member, it must be TMethod, TField, TProperty
+      saClass,      // This symbol is a class member, it must be TMethod.
+      saPrimitive,  // The symbol is compiled and defined
+      saTemp        // This symbol is only temporarily generated, such as @IntData,
+                    // the expression type is TPointerType, RefType points to Integer,
+                    // this TPointer is temporarily created
+  );
   TSymbolAttributes = set of TSymbolAttribute;
 
   TSymbol = class(TAstNode)
@@ -75,6 +87,7 @@ type
     property Name: TSymString read FName write FName;
     property UnitName: string read GetUnitName;
     property Module: TModule read GetModule;
+    // The symbol it belongs to, may be nil, such as the type generated during the operation
     property Parent: TSymbol read FParent write FParent;
     property Hints: TMemberHints read FHints write FHints;
     property FullName: TSymString read GetFullName;
@@ -83,8 +96,13 @@ type
   end;
 
   TSymbolClass = class of TSymbol;
-  TValueType = (vtEmpty, vtInt, vtInt64, vtReal, vtCurr, vtSet, vtBool, vtStr, vtWStr, vtAChr,
-    vtWChr, vtPtr, vtArray, vtRecord, vtSymbol, vtAddrOfSymbol, vtAddrOffset, vtIID, vtIIDStr);
+  // todo 1: (15/10/12) here should be changed back to store AnsiString, consider this situation:
+  // s: string ='aaa'#213 + #214 half a character into one
+  // vtStr has changed to store utf8 strings. 14/12/24
+  TValueType = (vtEmpty, vtInt, vtInt64, vtReal, vtCurr, vtSet, vtBool, vtStr,
+               // vtWStr is stored as a Utf8 string. 14/12/23
+               vtWStr, vtAChr, vtWChr, vtPtr, vtArray, vtRecord, vtSymbol,
+               vtAddrOfSymbol, vtAddrOffset, vtIID, vtIIDStr);
   TValueTypes = set of TValueType;
 
   TSetValue = class
@@ -92,19 +110,30 @@ type
     Bits: array[0..31] of byte;
     BitStart: byte;
     BitCount: byte;
+    //  procedure TestBit(Index: Integer);
     constructor Create;
     procedure Assign(Source: TSetValue);
     function IsEmpty: boolean;
     function AsString: string;
+    // Does this set contain R set
     function Include(R: TSetValue): boolean;
+    // take a bit value
     function TestBits(Index: byte): boolean;
+    // The minimum number of bytes in the collection
     function MinSize: integer;
+    // set/clear a bit
     procedure SetBits(Index: byte; Value: boolean);
+    // set/clear a range
     procedure SetRange(Lo, Hi: byte; Value: boolean);
+    // Update bits info, BitStart, BitCount
     procedure Update;
+    // compare
     function Equal(R: TSetValue): boolean;
+    // union
     class function Add(L, R: TSetValue): TSetValue;
+    // difference
     class function Sub(L, R: TSetValue): TSetValue;
+    // intersection
     class function Mul(L, R: TSetValue): TSetValue;
   end;
 
@@ -118,7 +147,7 @@ type
   TArrayValue = class;
   TRecordValue = class;
   PValueRec = ^TValueRec;
-
+  // const value
   TValueRec = record
     VT: TValueType;
     Res1: word;
@@ -136,12 +165,16 @@ type
       vtAChr: (VAChr: AnsiChar);
       vtWChr: (VWChr: integer);
       vtPtr: (VPtr: Pointer);
+//      vtType: (VType: TType);
+//      vtModule: (VModule: TModule);
+//      vtNameScope: (VModulePart: TNameScope);
       vtSymbol: (VSymbol: TSymbol);
       vtAddrOfSymbol: (VAddr: TSymbol);
       vtArray: (VArray: TArrayValue);
       vtRecord: (VRecord: TRecordValue);
+//      vtAddrOffset: (VOffset: TAddressOffset);
       vtIID: (VIID: TInterfaceType);
-      vtIIDStr: (VIIDStr: Pointer);
+      vtIIDStr: (VIIDStr: Pointer); // AnsiString
   end;
 
   TArrayValueRange = record
@@ -175,6 +208,10 @@ type
     function GetElementCount: integer;
     function GetDimCount: integer;
   public
+    // Total: the actual size of each dimension is multiplied
+    // Value: For example, the array is defined as array[1..4, 0..2, 2..6], Bounds is [4,3,5]
+    // Take V[3,1,3],
+    // The actual index position is (3-1)*(3*5) + 1*(5) + 3-1
     Items: array of TValueRec;
     property DimCount: integer read GetDimCount;
     property Bounds: TArrayBounds read FBounds;
@@ -184,6 +221,46 @@ type
     procedure Clear;
     function Put(Index: integer; var V: TValueRec): boolean;
   end;
+
+  {
+  // Generate LLVM array through TArrayValue
+procedure OutputValues(v: TArrayValue; count: Integer; var index: Integer);
+var
+  i: Integer;
+begin
+  Write('[');
+  for i := 0 to count - 1 do
+  begin
+    if i > 0 then Write(',');
+    Write('i8 ' + IntToStr(v.GetByte(index)));
+    Inc(index);
+  end;
+  Write(']');
+end;
+procedure OutputArray(v: TArrayValue; level: Integer; var index: Integer);
+begin
+  Assert(level < Length(v.Bounds), 'Level out of bounds');
+  if level = Length(v.Bounds) - 1 then
+  begin
+    OutputValues(v, v.Bounds[level], index);
+  end
+  else
+  begin
+    for i := 0 to v.Bounds[level] - 1 do
+    begin
+      if i > 0 then Write(',');
+      OpuputArray(v, level + 1, index);
+    end;
+  end;
+end;
+procedure OutputArray(v: TArrayValue);
+var
+  index: INteger;
+begin
+  index := 0;
+  OutputArray(v, 0, index);
+end;
+}
 
   TRecordValue = class
   private
@@ -206,6 +283,8 @@ type
   TModuleKind = (mkUnit, mkProgram, mkPackage, mkDLL);
   TModuleState = (msNone, msLoading, msIntfCompiling, msImplCompiling, msSaved, msGenOk);
 
+  // unit class
+  { TModule }
   TModule = class(TSymbol)
   private
     FType: TType;
@@ -220,23 +299,37 @@ type
     InternalSymbols: TSymbolTable;
     LoadedUnits: TSymbolTable;
     TimeStamp: TFileTimeStamp;
+    //  Hash: array[0..31] of Byte;
     InitializeFunc, FinalizeFunc: TFunction;
-    FileName: string;
+    //    InitializeCode, FinalizeCode: TCompoundStmt;
+    FileName: string;   // the IN filename, only written when not empty.
     Names: array of TSymString;
     Codes, Dump: string;
     constructor Create; override;
     destructor Destroy; override;
+    // find symbol
     function FindSymbol(const S: TSymString): TSymbol;
+    // Get pseudo-classes for expression analysis
     function GetType: TType;
     procedure SetNameScope(const Scopes: array of TSymString; Count: integer);
     procedure Add(Sym: TSymbol); override;
     procedure AddPrivate(Node: TAstNode);
   end;
 
+  {
+    unit freecode;
+    unit freecode.db;
+    unit freecode.db.help;
+    unit freecode.script;
+    If there is a symbol db in freecode, then
+    uses freecode,freecode.db;
+    Or uses freecode.db, freecode;
+    Then freecode.db overwrites the db symbol in freecode
+  }
   TNameScope = class(TSymbol)
   private
     FType: TType;
-    FSubNames: TStringList;
+    FSubNames: TStringList; // TNameScope or TModule
   public
     constructor Create; override;
     destructor Destroy; override;
@@ -245,15 +338,26 @@ type
     function GetType: TType;
   end;
 
+  {
+  TProgram = class(TModule)
+  public
+    StartStmt: TCompoundStmt;
+    constructor Create; override;
+  end;}
+
   TPackage = class(TSymbol)
   public
     Modules: TFPList;
   end;
 
+  // typInt8..typText: intrinsic type
   TTypeCode = (typUnknown, typUntype, typInt, typNumeric, typBool, typChar, typPointer,
     typPAnsiChar, typPWideChar, typString, typVariant, typFile, typText, typProcedural, typRecord,
     typObject, typClass, typInterface, typClassRef, typEnum, typSet, typSubrange, typArray,
-    typDynamicArray, typSymbol, typAlias, typClonedType, typOpenArray, typVector);
+    typDynamicArray,
+    // used for unit scope resolve
+    typSymbol,
+    typAlias, typClonedType, typOpenArray, typVector);
   TTypeCodes = set of TTypeCode;
   TBaseTypeCode = (btcUnknown, btcUntype, btcShortint, btcByte, btcSmallint, btcWord, btcLongint,
     btcLongWord, btcInt64, btcUInt64, btcComp, btcSingle,
@@ -263,6 +367,9 @@ type
     btcFile, btcText, btcProcedural, btcRecord, btcObject, btcClass, btcInterface, btcDispInterface,
     btcClassRef, btcEnum, btcSet, btcSubrange, btcArray, btcDynamicArray, btcOpenArray);
 
+  //  TTypeAttribute = (taAutoInit, taTypeInfo);
+  //  TTypeAttributes = set of TTypeAttribute;
+
   TType = class(TSymbol)
   private
     FSize: cardinal;
@@ -271,30 +378,50 @@ type
   protected
     function GetAlignSize: byte; virtual;
   public
+    // If it is an anonymous type, the name may be empty
+    // Name: TSymString
     constructor Create; override;
     destructor Destroy; override;
     property TypeCode: TTypeCode read FTypeCode;
     property Size: cardinal read FSize write FSize;
-    property AlignSize: byte read GetAlignSize;
+    property AlignSize: byte read GetAlignSize; // 1..16
     property PointerType: TType read FPointerType;
+    // Create this type of pointer type Size: 4, 8
     procedure CreatePointerType(ASize: cardinal);
+    // Take the basic type
     function BaseCode: TBaseTypeCode; {$IFNDEF DEBUG}inline;{$ENDIF}
+    // Take the original type
+    // For example type MyInt = Integer; MyInt2 = MyInt
+    // The original type of MyInt2 is Integer
     function OriginalType: TType;
     function NormalType: TType; {$IFNDEF DEBUG}inline;{$ENDIF}
+    // Is it an ordered type int, enum, subrange, char, boolean
     function IsOrdinal: boolean; {$IFNDEF DEBUG}inline;{$ENDIF}
+    // Is it a number type single, double, currency, comp
     function IsReal: boolean; {$IFNDEF DEBUG}inline;{$ENDIF}
     function IsComp: boolean; {$IFNDEF DEBUG}inline;{$ENDIF}
+    // Is it a currency type
     function IsCurrency: boolean; {$IFNDEF DEBUG}inline;{$ENDIF}
     function IsSingle: boolean; {$IFNDEF DEBUG}inline;{$ENDIF}
+    // Is it an integer typInt
     function IsInteger: boolean; {$IFNDEF DEBUG}inline;{$ENDIF}
+    // Is it intS32
     function IsInt32: boolean; {$IFNDEF DEBUG}inline;{$ENDIF}
     function IsSignedInt: boolean; {$IFNDEF DEBUG}inline;{$ENDIF}
+    // Is it a signed number (signed integer and real number)
     function IsSigned: boolean; {$IFNDEF DEBUG}inline;{$ENDIF}
+    // Is it a boolean
     function IsBoolean: boolean; {$IFNDEF DEBUG}inline;{$ENDIF}
+    // Is it a standard Boolean type
     function IsStdBool: boolean; {$IFNDEF DEBUG}inline;{$ENDIF}
+    // Is it typProcedural
     function IsProcedural: boolean; {$IFNDEF DEBUG}inline;{$ENDIF}
+    // Is it a method pointer
     function IsMethodPointer: boolean; {$IFNDEF DEBUG}inline;{$ENDIF}
+    // Is it a string, or compatible with a string
+    // typAnsiString..typShortString, one-dimensional Char/WideChar array
     function IsStringCompatible: boolean; {$IFNDEF DEBUG}inline;{$ENDIF}
+    // Whether the type can be used in string operations (comparison, assignment, addition)
     function IsStringArithCompatible: boolean; {$IFNDEF DEBUG}inline;{$ENDIF}
     function IsUnicodeString: boolean; {$IFNDEF DEBUG}inline;{$ENDIF}
     function IsWideString: boolean; {$IFNDEF DEBUG}inline;{$ENDIF}
@@ -302,20 +429,26 @@ type
     function IsShortString: boolean; {$IFNDEF DEBUG}inline;{$ENDIF}
     function IsAnsiShortString: boolean; {$IFNDEF DEBUG}inline;{$ENDIF}
     function IsWideShortString: boolean; {$IFNDEF DEBUG}inline;{$ENDIF}
+    // A one-dimensional, packed, static array of Char values is called a packed string
     function IsPackedString: boolean; {$IFNDEF DEBUG}inline;{$ENDIF}
     function IsPackedStringAnsi: boolean; {$IFNDEF DEBUG}inline;{$ENDIF}
     function IsPackedStringWide: boolean; {$IFNDEF DEBUG}inline;{$ENDIF}
     function IsPAnsiChar: boolean; {$IFNDEF DEBUG}inline;{$ENDIF}
     function IsPWideChar: boolean; {$IFNDEF DEBUG}inline;{$ENDIF}
+    // Is it a Variant, or compatible with Variant
     function IsVariantCompatible: boolean; {$IFNDEF DEBUG}inline;{$ENDIF}
+    // Is it a pointer (typPointer, typPAnsiChar, typPWideChar)
+    // Others, such as typClass, are compatible with pointers, but not
     function IsPointer: boolean; {$IFNDEF DEBUG}inline;{$ENDIF}
+    // Whether based on pointer (including pointer, class, class reference, interface, long string)
     function IsPointerBased: boolean; {$IFNDEF DEBUG}inline;{$ENDIF}
     function IsUntypePointer: boolean; {$IFNDEF DEBUG}inline;{$ENDIF}
+    // Is the same type
     function Equals(typ: TType): boolean; reintroduce;
   end;
 
   TTypeClass = class of TType;
-
+  // Compiler intrinsic type
   TPrimitiveType = class(TType)
   protected
     function GetAlignSize: byte; override;
@@ -328,7 +461,7 @@ type
   public
     constructor Create; override;
   end;
-
+  // MyInt = Integer
   TAliasType = class(TType)
   private
     FRefType: TType;
@@ -337,7 +470,7 @@ type
     procedure Update;
     property RefType: TType read FRefType write FRefType;
   end;
-
+  // MyInt = type Integer;
   TClonedAliasType = class(TAliasType)
   public
     constructor Create; override;
@@ -345,7 +478,7 @@ type
 
   TOrdType = class(TType)
   end;
-
+             // Shortint,Byte,Smallint,Word,Longint,LongWord,Int64,UInt64
   TIntKind = (intS8, intU8, intS16, intU16, intS32, intU32, intS64, intU64);
 
   TIntType = class(TOrdType)
@@ -373,6 +506,8 @@ type
   end;
 
   TNumericKind = (numSingle, numDouble, numExtended, numCurrency, numComp, numReal48);
+  //TNumericAttribute = (naIsDateTime);
+  //TNumericAttributes = set of TNumericAttribute;
 
   TNumericType = class(TType)
   public
@@ -393,7 +528,10 @@ type
     constructor Create(AKind: TStringKind); reintroduce;
     procedure Update;
     property Kind: TStringKind read FKind write FKind;
+    // Code page 0 means the system default code page
+    // Used for strAnsi, such as type declaration: type MyStr = AnsiString(936);
     property CodePage: word read FCodePage write FCodePage;
+    // Number of characters, used for strAShort, strWShort
     property CharCount: word read FCharCount write FCharCount;
   end;
 
@@ -422,9 +560,10 @@ type
     procedure UpdateRange;
     procedure CalcSize(MinSize: integer = 1);
   public
+    // Range type composed of minimum and maximum
     SubrangeType: TSubrangeType;
-    Values: TFPList;
-    MinEnumSize: byte;
+    Values: TFPList;   // TEnumValue
+    MinEnumSize: byte;  // 1..4
     constructor Create; override;
     destructor Destroy; override;
     procedure Update;
@@ -439,10 +578,14 @@ type
     FBaseType: TType;
     procedure SetBaseType(const Value: TType);
   public
+    // Corresponding set type
     SetType: TSetType;
+    // TEnumType or ordinal primitive type
     RangeBegin, RangeEnd: int64;
     constructor Create; override;
+    //  destructor Destroy; override;
     property BaseType: TType read FBaseType write SetBaseType;
+    // Whether the limit of this type is within typ
     function SubSetOf(typ: TSubrangeType): boolean; {$IFNDEF DEBUG}inline;{$ENDIF}
   end;
 
@@ -451,7 +594,7 @@ type
     function GetAlignSize: byte; override;
     procedure UpdateSize;
   public
-    RangeType: TSubrangeType;
+    RangeType: TSubrangeType;  // If = nil, it is a general set, used to represent an empty set
     constructor Create; override;
     function IsCommonSetType: boolean;
     procedure Update;
@@ -480,7 +623,7 @@ type
   protected
     function GetAlignSize: byte; override;
   public
-    ElementType: TType;
+    ElementType: TType; // must not be nil
     Range: TSubrangeType;
     IsPacked: boolean;
     ArrayAttr: TStructAttributes;
@@ -503,14 +646,14 @@ type
   protected
     function GetAlignSize: byte; override;
   public
-    ElementType: TType;
+    ElementType: TType; // element type. (generally not nil)
     ElementCount: integer;
     constructor Create; override;
   end;
 
   TStructuredType = class(TType)
   end;
-
+                    // Part of Record.
   TFieldAttribute = (faRecVar);
   TFieldAttributes = set of TFieldAttribute;
 
@@ -518,7 +661,9 @@ type
   public
     FieldType: TType;
     Offset: cardinal;
+    //  Index: Integer;
     FieldAttr: TFieldAttributes;
+    //    IsStatic: Boolean;
     constructor Create; override;
     function AlignOfParent: byte;
   end;
@@ -528,7 +673,7 @@ type
 
   TMultiAccessor = class(TSymbol)
   public
-    Fields: array of TSymbol;
+    Fields: array of TSymbol; // first is TVariable or TField, others are TField.
     FieldCount: integer;
     constructor Create; override;
     procedure Add(Field: TSymbol); reintroduce;
@@ -539,7 +684,7 @@ type
   TProperty = class(TSymbol)
   public
     PropType: TType;
-    Getter, Setter, Stored: TSymbol;
+    Getter, Setter, Stored: TSymbol;  // TMultiAccessor, TField or TMethod;
     Index: integer;
     Params: TFuncParamList;
     DefaultValue: TValueRec;
@@ -554,6 +699,13 @@ type
   end;
 
   TMethod = class;
+
+  {TRecordField = class(TField)
+    public
+      IsVariantPart: Boolean; // 是否是变体的一部分
+      constructor Create; override;
+    end;}
+
   TRecordVariant = class;
 
   TRecordBody = class
@@ -561,10 +713,11 @@ type
     procedure UpdateAlign;
     function RecordSize: int64;
   public
-    Members: TFPList;
-    Selector: TField;
-    Variants: TRecordVariant;
-    MaxAlignSize: byte;
+    Members: TFPList; // TRecordField
+    // Selector,Variants, Next可为nil
+    Selector: TField; // Record the variant part, Selector.Name can be ''
+    Variants: TRecordVariant; // Variants.Next connects to the next set of variants
+    MaxAlignSize: byte; // Maximum alignment among members
     constructor Create;
     destructor Destroy; override;
     procedure Update(GlobalAlignSize: byte; Offset: cardinal);
@@ -575,8 +728,8 @@ type
 
   TRecordVariant = class(TRecordBody)
   public
-    Next: TRecordVariant;
-    Offset: cardinal;
+    Next: TRecordVariant; // Next connect the next set of variants
+    Offset: cardinal;  // offset of this variant
     destructor Destroy; override;
   end;
 
@@ -586,9 +739,11 @@ type
     function GetAlignSize: byte; override;
     procedure AddSymbol(Sym: TSymbol); override;
   public
+    //    Members: TList;
     Symbols: TSymbolTable;
     Body: TRecordBody;
-    GlobalAlignSize: byte;
+    // The default AlignSize when defining the record
+    GlobalAlignSize: byte;  // 1..16
     RecordAttr: TStructAttributes;
     constructor Create; override;
     destructor Destroy; override;
@@ -598,7 +753,12 @@ type
   end;
 
   TClassRefType = class;
-  TClassAttribute = (caSealed, caAbstract, caRtti);
+  TClassAttribute = (
+      caSealed,
+      caAbstract,
+      caRtti  // true means $M+ when the class is declared, false means $M-,
+              // the state of $M will affect the subclass
+  );
   TClassAttributes = set of TClassAttribute;
   TMethodResolution = class;
 
@@ -617,7 +777,7 @@ type
   public
     procedure UpdateVmtEntry(Index: integer; AIntfMeth, AImplMeth: TMethod);
     property EntryCount: integer read FEntryCount;
-    property IntfType: TInterfaceType read FIntfType;
+    property IntfType: TInterfaceType read FIntfType; // write FIntfType;
     property Entries: TIntfVmtEntryArray read FEntries;
     property Offset: integer read FOffset;
     property ImplGetter: TMethod read FImplGetter;
@@ -636,29 +796,48 @@ type
   protected
     procedure AddSymbol(Sym: TSymbol); override;
   public
-    Symbols: TSymbolTable;
-    Base: TClassType;
+    // Symbols among these types of class, object, interface, record,
+    // Put each overloaded function separately. But the key is not TSymbol.Name, but
+    // Name +'@' + IntToStr(TFunctionDecl.ID);
+    // The put TMethod.Modifiers include fmOvrldFlag
+    // The purpose of this is to maintain the order of members
+    Symbols: TSymbolTable; // TType, TField, TConstant, TMethod, TFunction
+    Base: TClassType; // if nil, this is TObject
     DefaultProp: TProperty;
-    ObjectSize: int64;
-    VmtEntryCount: integer;
+    ObjectSize: int64;  // Instance Size
+    VmtEntryCount: integer; // Number of vmt entries
     Vmt: array of TMethod;
     MR: TMethodResolution;
-    GlobalAlignSize: byte;
+    GlobalAlignSize: byte; // 1,2,4,8,16 Align when the class is declared
     ClassAttr: TClassAttributes;
+    // todo 1: VMT establishment
+    // todo 1: Find the maximum alignment byte
     constructor Create; override;
     destructor Destroy; override;
+    // A table of all symbols in this class and base class, only used in ParseFunction,
+    // This may improve the search speed and avoid the upward loop to find the base class
     property AllSymbols: TSymbolTable read GetAllSymbols;
+    // Whether the class or base class is compiled in the $M+ state
     function RttiEnabled: boolean;
+    // todo 1: Need to consider the implementation of the interface.
+    // Find in the current class and its class
     function FindSymbol(const S: TSymString): TSymbol;
+    // Find only in the current class
     function FindCurSymbol(const S: TSymString): TSymbol;
+    // find only in base class
     function FindBaseSymbol(const S: TSymString): TSymbol;
+    // This class inherits from ABase?
     function IsInheritedFrom(ABase: TClassType): boolean;
+    // Whether to directly or indirectly implement the interface
     function IsImplemented(AIntf: TInterfaceType): boolean;
+    // Take the direct or indirect TClassIntfEntry
     function FindIntfEntry(AIntf: TInterfaceType): TClassIntfEntry;
+    // Take the class reference of the class (class reference)
     function GetClassRef: TClassRefType;
     procedure AddInterface(Intf: TInterfaceType);
     procedure ClearInterface;
     function GetInternalAddrOfIntf(i: integer): Pointer;
+    // Calculate field offset, VMT position, etc.
     procedure Update(PtrSize: integer);
     procedure Add(Sym: TSymbol); override;
     property Interfaces[Index: integer]: TInterfaceType read GetInterface;
@@ -671,6 +850,7 @@ type
     RefType: TClassType;
     constructor Create; override;
     function IsInheritedFrom(ClassRef: TClassRefType): boolean;
+    //procedure Update(const CntxInfo: TContextInfo); override;
   end;
 
   TIntfPropertyAttribute = (ipaNoUsed, ipaDefaultProp, ipaReadOnly, ipaWriteOnly, ipaHasDispID);
@@ -689,6 +869,8 @@ type
     function ParamCount: integer;
   end;
 
+  // The base class of dispinterface is actually DispInterface
+
   TInterfaceType = class(TType)
   private
     FAllSymbols: TSymbolTable;
@@ -697,23 +879,31 @@ type
     procedure AddSymbol(Sym: TSymbol); override;
   public
     Guid: TGuid;
-    Symbols: TSymbolTable;
-    Base: TInterfaceType;
+    Symbols: TSymbolTable; // TMethod, TInterfaceProperty
+    Base: TInterfaceType; // if nil, this is IUnknown
     DefaultProp: TIntfProperty;
-    VmtEntryCount: word;
+    VmtEntryCount: word; // vmt entry number, include base's vmt
     IsDisp: boolean;
     constructor Create; override;
     destructor Destroy; override;
     property AllSymbols: TSymbolTable read GetAllSymbols;
+    // Find in the current class and its class
     function FindSymbol(const S: TSymString): TSymbol;
+    // Find only in the current class
     function FindCurSymbol(const S: TSymString): TSymbol;
+    // find only in base class
     function FindBaseSymbol(const S: TSymString): TSymbol;
+    // This class inherits from ABase or is equivalent to ABase?
     function IsInheritedFrom(ABase: TInterfaceType): boolean;
     procedure Add(Sym: TSymbol); override;
     procedure UpdateVmt;
   end;
 
-  TObjectAttribute = (oaHasVirtual, oaHasVmt, oaBeginVmt);
+  TObjectAttribute = (
+          oaHasVirtual, // This class has virtual methods
+          oaHasVmt, // This class has vmt (may start from the parent class)
+          oaBeginVmt // vmt starts from this class
+  );
   TObjectAttributes = set of TObjectAttribute;
 
   TObjectType = class(TType)
@@ -723,27 +913,34 @@ type
   protected
     procedure AddSymbol(Sym: TSymbol); override;
   public
-    Symbols: TSymbolTable;
+    Symbols: TSymbolTable; // TMethod, TProperty, TField, TType
     Base: TObjectType;
     DefaultProp: TProperty;
-    VmtOffset: cardinal;
-    VmtEntryCount: integer;
-    GlobalAlignSize: byte;
+    VmtOffset: cardinal; // Offset of vmt table
+    VmtEntryCount: integer; // Number of vmt entries
+    GlobalAlignSize: byte; // 1,2,4,8,16 Align when the class is declared
     ObjectAttr: TObjectAttributes;
     constructor Create; override;
     destructor Destroy; override;
+    // All symbols of current and base class
     property AllSymbols: TSymbolTable read GetAllSymbols;
+    // Find in the current class and its class
     function FindSymbol(const S: TSymString): TSymbol;
+    // Find only in the current class
     function FindCurSymbol(const S: TSymString): TSymbol;
+    // find only in base class
     function FindBaseSymbol(const S: TSymString): TSymbol;
+    // This class inherits from ABase?
     function IsInheritedFrom(ABase: TObjectType): boolean;
+    // Calculate field offset, VMT position, etc.
     procedure Update(PtrSize: integer);
+    // add symbols
     procedure Add(Sym: TSymbol); override;
   end;
 
   TFileType = class(TType)
   public
-    ElementType: TType;
+    ElementType: TType; // ElementType may be nil
     constructor Create; override;
     function IsUntype: boolean;
   end;
@@ -755,23 +952,35 @@ type
 
   TSymbolType = class(TType)
   public
-    Reference: TSymbol;
+    Reference: TSymbol; // TNameScope or TModule
     constructor Create; override;
   end;
 
   TArgumentModifier = (argDefault, argConst, argVar, argOut);
-  TArgState = (asInit, asNestRef, asByRef, asStructRef, asStructValue, asNeedAddRef, asNeedFree);
+  TArgState = (
+          asInit, // has been initialized
+          asNestRef, // referenced by nested functions
+          asByRef, // pass by reference
+          asStructRef, // Pass structure reference
+          asStructValue, // Pass structure value
+          asNeedAddRef,
+          asNeedFree
+  );
   TArgStates = set of TArgState;
   TArgumentKind = (akNormal, akArrayOfType, akArrayOfConst, akUntype);
-
+  // array of const: ArgType = TOpenArrayType and TOpenArrayType.ElementType = typUntype
+  // array of Type: ArgType = TOpenArrayType and TOpenArrayType.ElementType <> typUntype
+  // var obj: ArgType = typUntype and Modifier = argVar
+  // out obj: ArgType = typUntype and Modifier = argOut
+  // const obj: ArgType = typUntype and Modifier = argConst
   TFuncParam = class(TSymbol)
   public
-    ParamType: TType;
+    ParamType: TType; // No type points to typUntype
     ArgKind: TArgumentKind;
     States: TArgStates;
     Modifier: TArgumentModifier;
-    Level: byte;
-    Index: word;
+    Level: byte; // Number of nesting levels, 0 is the top level, no need to save
+    Index: word; // sequence, don't need to save
     DefaultValue: TValueRec;
     constructor Create; override;
     destructor Destroy; override;
@@ -812,19 +1021,98 @@ type
     function MinOfParams: integer;
   end;
 
-  TCompilerDirective = (cdBoolEval, cdIOChecks, cdOverflowChecks, cdRangeChecks, cdSafeDivide,
-    cdTypeInfo, cdTypedAddress, cdWriteableConst, cdAssertions, cdOptimization, cdStackFrames,
-    cdDebugInfo, csExtendedSyntax, csLongStrings, csOpenStrings, csVarStringChecks, csRealCompatibility,
-    cdAlign, cdAppType, cdMinEnumSize, cdDefine, cdUndef, cdIf, cdIfOpt, cdIfDef, cdIfNDef, cdElse,
-    cdElseIf, cdEndIf, cdIfEnd, cdNoDefine, cdHPPEmit, cdExternalSym, cdResource, cdInclude, cdMode, cdModeSwitch);
+  TCompilerDirective = (
+    cdBoolEval,                   // $B $BOOLEVAL
+    cdIOChecks,                   // $I $IOCHECKS
+    cdOverflowChecks,             // $Q $OVERFLOWCHECKS
+    cdRangeChecks,                // $R $RANGECHECKS
+    cdSafeDivide,                 // $U $SAFEDIVIDE
+    cdTypeInfo,                   // $M $TypeInfo
+    cdTypedAddress,               // $T $TYPEDADDRESS
+    cdWriteableConst,             // $J $WRITEABLECONST
+    cdAssertions,                 // $C $ASSERTIONS
+    cdOptimization,               // $O $OPTIMIZATION
+    cdStackFrames,                // $W $STACKFRAMES
+    cdDebugInfo,                  // $D $DEBUGINFO
+    csExtendedSyntax,             // $X $ExtendedSyntax
+    csLongStrings,                // $H $LONGSTRINGS
+    csOpenStrings,                // $P $OPENSTRINGS
+    csVarStringChecks,            // $V $VARSTRINGCHECKS
+    csRealCompatibility,          // $REALCOMPATIBILITY
+
+    cdAlign,                      // $A $ALIGN
+    cdAppType,                    // $APPTYPE
+    cdMinEnumSize,                // $Z $MINENUMSIZE
+
+    cdDefine,
+    cdUndef,
+    cdIf,
+    cdIfOpt,
+    cdIfDef,
+    cdIfNDef,
+    cdElse,
+    cdElseIf,
+    cdEndIf,
+    cdIfEnd,
+
+    cdNoDefine,     // for c++
+    cdHPPEmit,      // for c++
+    cdExternalSym,  // for c++
+
+    cdResource,                   // $R $RESOURCE
+    cdInclude,                    // $I $INCLUDE
+
+    cdMode,                       // $MODE objfpc/delphi
+    cdModeSwitch                  // $modeswitch
+  );
   TCodeSwitches = set of cdBoolEval..cdSafeDivide;
-  TExprOpCode = (opNONE, opNE, opEQ, opLT, opLE, opGT, opGE, opIN, opIS, opAS, opADD, opSUB,
-    opOR, opXOR, opMUL, opFDIV, opIDIV, opMOD, opAND, opSHL, opSHR, opMEMBER, opCAST, opCALL,
-    opRANGE, opINDEX, opASSIGN, opFMT, opNOT, opNEG, opPOS, opINHERITED, opSET, opLIST, opADDR,
-    opDBLADDR, opINST, opDISPCALL, opNIL, opCONST, opSYMBOL);
+  TExprOpCode = (opNONE,
+    // binary opNE..opSHR its position cannot be changed
+    opNE, opEQ, opLT, opLE, opGT, opGE, opIN, opIS, opAS,
+    opADD, opSUB, opOR, opXOR,
+    opMUL, opFDIV, opIDIV, opMOD, opAND, opSHL, opSHR,
+    opMEMBER, // eg. SomeObj.A, the A is member of SomeObj
+    opCAST,   // Integer(a);
+    opCALL,   // function call
+    opRANGE,  // .. subrange
+    opINDEX,  // [] array index
+    opASSIGN, // :=
+    opFMT,    // Value:Width:DecPlace
+    // unary
+    opNOT, opNEG, opPOS,
+    opINHERITED, // inherited keyword
+    opSET,  // [] set / open array constructor
+    opLIST, // express list, seperated by comma
+    opADDR, // @ get address
+    opDBLADDR, // @@ get address of procedural variable
+    opINST, // ^ dereference
+    opDISPCALL, // .Method()
+    // other
+    opNIL,
+    {opBOOLCONST, opINTCONST, opREALCONST, opSTRCONST, opCHARCONST,}
+    opCONST, opSYMBOL
+  );
   TExprOpKind = (opkNone, opkUnary, opkBinary, opkList, opkConst, opkSymbol);
-  TExprAttribute = (eaVerified, eaInvalid, eaDelayed, eaCall, eaArgList, eaOverloadRestrict,
-    eaArrayProp, eaInherited, eaConst, eaVarCast, eaStrOp, eaVarOp, eaSetOp, eaRes2, eaRes3, eaRes4);
+  TExprAttribute = (
+      eaVerified, // (maybe remove)expr node is verified
+      eaInvalid, // (maybe remove)expr node is invalid
+      eaDelayed, // The expression involves function pointers, and it is impossible to determine whether it should be expanded to call,
+                 // Or take the address of which overloaded function, it needs to be delayed to the superior node to determine,
+                 // If proc is passed as a parameter, or @proc (proc is overloaded)
+      eaCall, // The expression needs to be expanded to call, for eaDelayed
+      eaArgList, // expression is a list of parameters
+      eaOverloadRestrict, // Find Overload only in the unit where the function is located. <Delphi's way>
+      eaArrayProp,
+      eaInherited, // There is inherited before the symbol
+      eaConst,          // expr node is const
+      eaVarCast,        // expr is variable cast
+      eaStrOp,          // expr is string operation(concat,compare)
+      eaVarOp,          // expr is variant operation
+      eaSetOp,          // expr is set operation
+      eaRes2,
+      eaRes3,
+      eaRes4
+  );
   TExprAttributes = set of TExprAttribute;
 
   TExpr = class(TAstNode)
@@ -837,27 +1125,57 @@ type
     Attr: TExprAttributes;
     property Typ: TType read FTyp write FTyp;
     property OpCode: TExprOpCode read FOpCode write FOpCode;
+    //    property Attr: TExprAttributes read FAttr write FAttr;
     property Parent: TExpr read FParent;
     constructor Create; override;
+    // reset this expression
     procedure Reset; virtual;
+    // Remove Child from direct children.
     procedure Remove(Child: TExpr); virtual;
+    // Disconnect from the parent node
     procedure Detach;
+    // Take the symbol pointed to by this expression
+    // The expression may be an opSYMBOL or opMEMBER
     function GetReference: TSymbol;
     function GetFunctionSymbol: TFunctionDecl;
     function GetVariableSymbol: TVariable;
     function GetConstantSymbol: TConstant;
     procedure SetReference(Ref: TSymbol);
+    // Whether to point to a type symbol
     function IsTypeSymbol: boolean;
+    {// is the field
+     function IsField: Boolean;
+     // Whether to point to a variable symbol (possibly opSYMBOL, opMEMBER, opINST, opINDEX, opCAST)
+     function IsVariable: Boolean;
+     // is a constant (true constant)
+     function IsConstant: Boolean;}
+    // is a type constant
     function IsTypedConstant: boolean;
+    // Whether the expression is a constant value (constant symbol or TConstExpr)
     function IsConstantValue: boolean;
+    // Is it a string constant (string constant symbol or expression)
     function IsStringConstant: boolean;
+    // Is it a character constant (character constant symbol or expression)
     function IsCharConstant: boolean;
+    // Is it an empty string (empty string constant symbol or expression)
     function IsEmptyString: boolean;
+    // Does it point to a memory address (possibly opSYMBOL, opMEMBER, opINST, opINDEX, opCAST)
+    // v1
+    // guid.d2 guid^.d2
+    // ptr^
+    // (ptr + 1)^
+    // pbyte(p^)
+    // pchar(ptr)[1]
     function HasMemory: boolean;
+    // is a function (including method, external function) symbol
     function IsFunction: boolean;
+    // is the constructor symbol
     function IsCtorSymbol: boolean;
+    // is the type symbol
     function IsClassType: boolean;
+    // Is it a constructor call?
     function IsCtorCall: boolean;
+    // is the nil symbol
     function IsNilConst: boolean;
   end;
 
@@ -868,6 +1186,9 @@ type
     fOperand: TExpr;
     procedure SetOperand(const Value: TExpr);
   public
+    // opNOT, opNEG, opPOS, opINST
+    // opSET: Operand may be nil
+    // opLIST: Operand may be nil
     property Operand: TExpr read fOperand write SetOperand;
     procedure Reset; override;
     procedure Remove(Child: TExpr); override;
@@ -880,6 +1201,10 @@ type
     procedure SetLeft(const Value: TExpr);
     procedure SetRight(const Value: TExpr);
   public
+    // opCALL: Left is a function expression, Right is the call parameter list (opLIST), if there is no parameter, it is nil
+    // Left of opCALL can be TSymbolExpr or other expressions of type TProceduralType
+    // opMEMBER: Left parent expression, Right is child expression
+    // opINDEX: Left is the array expression, Right is the index value (ExprList)
     property Left: TExpr read FLeft write SetLeft;
     property Right: TExpr read FRight write SetRight;
     procedure Reset; override;
@@ -907,34 +1232,56 @@ type
     Reference: TSymbol;
     procedure Reset; override;
   end;
+  
+{  TNilExpr = class(TExpr)
+  public
+    //construct
+  end;}
 
   TConstExpr = class(TExpr)
   public
-    Value: TValueRec;
+    //Value: Variant;
+    Value: TValueRec; // Enum and Char are stored as vtInt
     destructor Destroy; override;
     procedure Reset; override;
   end;
 
   TStrConstExpr = class(TExpr)
   public
-    RawValue: string;
+    RawValue: string; // Original unparsed value, only string
     procedure Reset; override;
   end;
 
-  TVarAttribute = (vaReserved1, vaReserved2, vaReadOnly, vaLocal, vaHidden, vaTls, vaResult, vaSelf);
+  TVarAttribute = (
+     vaReserved1, //
+     vaReserved2, //
+     vaReadOnly, // read only
+     vaLocal, // local variable
+     vaHidden, // Not in the code statement
+     vaTls, // threadvar
+     vaResult, // The variable used to save the result
+     vaSelf // Self pointer
+  );
   TVarAttributes = set of TVarAttribute;
-  TVarState = (vsInit, vsNestRef, vsResultAddr, vsNeedInit, vsNeedFree, vsTemp);
+  TVarState = (
+     vsInit, // has assignment
+     vsNestRef, // accessed by nested function
+     vsResultAddr, // is the Result variable, but this variable is an address (passed in by the calling function)
+     vsNeedInit,
+     vsNeedFree,
+     vsTemp // Temporary variable, no memory needed
+  );
   TVarStates = set of TVarState;
 
   TVariable = class(TSymbol)
   public
     VarType: TType;
     Value: TValueRec;
-    AbsVar: TSymbol;
+    AbsVar: TSymbol; // V2: Byte absolute V1;
     VarAttr: TVarAttributes;
     States: TVarStates;
-    Level: byte;
-    Index: word;
+    Level: Byte; // Nesting level, 0 is the top level, no need to save
+    Index: Word; // order, no need to save
     constructor Create; override;
     destructor Destroy; override;
   end;
@@ -944,15 +1291,25 @@ type
     ConstType: TType;
     Value: TValueRec;
     IsResStr: boolean;
+    //    IsTyped: Boolean;
     constructor Create; override;
     destructor Destroy; override;
   end;
 
   TFunctionModifier = (fmVirtual, fmDynamic, fmAbstract, fmOverride, fmOverload, fmMessage,
     fmReintroduce, fmStatic, fmInline, fmAssembler, fmVarargs, fmLocal, fmDispID, fmExport, fmNear,
-    fmFar, fmExternal, fmForward, fmNoReturn, fmOvrldFlag);
+    fmFar, fmExternal, fmForward, fmNoReturn, { Equivalent to noreturn of llvm } fmOvrldFlag);
   TFunctionModifiers = set of TFunctionModifier;
+  
+{  TFuncAttribute = (
+               faVirtual, faDynamic, faAbstract, faOverride,
+               faOverload, faMessage, faReintroduce, faStatic,
+               faInline, faAssembler, faVarargs, faLocal,
+               faExport, faExternal, faForward,
+               faNoReturn, faMultiDecl );
+  TFuncAttributes = set of TFuncAttribute; }
 
+  // Function declaration
   TFunctionDecl = class(TSymbol)
   private
     FProcType: TProceduralType;
@@ -960,16 +1317,18 @@ type
   protected
     procedure CreateProceduralType; virtual;
   public
-    ID: integer;
+    ID: integer; // Number, used to distinguish overloaded methods
     Params: TFuncParamList;
-    ReturnType: TType;
-    NextOverload: TFunctionDecl;
+    ReturnType: TType; // nil means procedure
+    NextOverload: TFunctionDecl; // overload chains
+    //  Overloads: TList;
     Modifiers: TFunctionModifiers;
     CallConvention: TCallingConvention;
-    Level: byte;
+    Level: byte; // The number of nesting levels, the top level is 0
     destructor Destroy; override;
     procedure CreateParams;
     function ParamCount: integer;
+    // The number of parameters after deducting the default value
     function MinOfParams: integer;
     function IsOverload: boolean;
     procedure AddOverload(Func: TFunctionDecl);
@@ -979,12 +1338,16 @@ type
   TExternalFunction = class(TFunctionDecl)
   public
     FileName: string;
-    RoutineName: TSymString;
-    RoutineNo: integer;
+    RoutineName: TSymString;  // name
+    RoutineNo: integer;  // index
     constructor Create; override;
   end;
 
-  TFuncAttr = (faNeedFP, faNeedFPArg, faOperatorOverloading);
+  TFuncAttr = (
+     faNeedFP, // Need to establish a stack frame structure
+     faNeedFPArg, // Need to pass in the upper level stack frame
+     faOperatorOverloading
+  );
   TFuncAttrs = set of TFuncAttr;
 
   TFunction = class(TFunctionDecl)
@@ -994,6 +1357,7 @@ type
     LocalSymbols: TSymbolTable;
     StartStmt: TCompoundStmt;
     Codes: TObject;
+    // Level: Byte; // Nesting level, the top level is 0
     FuncAttr: TFuncAttrs;
     constructor Create; override;
     destructor Destroy; override;
@@ -1007,9 +1371,9 @@ type
   public
     MethodKind: TMethodKind;
     ObjectKind: TObjectKind;
-    VTIndex: smallint;
-    MsgNo: word;
-    DispID: integer;
+    VTIndex: smallint; // Index in VMT, negative
+    MsgNo: word; // Message id.
+    DispID: integer; // disp id.
     constructor Create; override;
     function IsClassOrStatic: boolean;
   end;
@@ -1024,7 +1388,8 @@ type
   TBuiltinFunctionKind = (bfAbs, bfAddr, bfAssigned, bfBreak, bfChr, bfContinue, bfCopy, bfDec,
     bfDispose, bfExclude, bfExit, bfFinalize, bfFreeMem, bfGetMem, bfHi, bfHigh, bfInc, bfInclude,
     bfInitialize, bfLength, bfLo, bfLow, bfNew, bfOdd, bfOrd, bfPred, bfPtr, bfRound, bfSucc,
-    bfSetLength, bfSizeOf, bfSwap, bfTrunc, bfTypeInfo, bfNoop, bfStr, bfWrite, bfWriteLn, bfRead, bfReadLn);
+    bfSetLength, bfSizeOf, bfSwap, bfTrunc, bfTypeInfo, bfNoop, bfStr, bfWrite, bfWriteLn, bfRead, bfReadLn
+    {,bfFillChar, bfMove, bfVal} );
 
   TBuiltinFunction = class(TSymbol)
   public
@@ -1033,10 +1398,14 @@ type
   end;
 
   TStmtKind = (skEmptyStmt, skCompoundStmt, skIfStmt, skCaseStmt, skForStmt, skWhileStmt,
-    skRepeatStmt, skTryStmt, skLabelStmt, skRaiseStmt, skAssignmentStmt, skCallStmt, skGotoStmt,
+    skRepeatStmt, skTryStmt, skLabelStmt, {skWithStmt,} skRaiseStmt, skAssignmentStmt, skCallStmt, skGotoStmt,
     skCtorInit, skCtorAfter, skDtorBefore, skDtorInit, skCleanup, skHandleExcept, skLocalInit,
     skLocalUninit, skJumpTrue, skJumpFalse, skJump, skMark, skOAInit);
-  TStmtAttribute = (stmtNoReturn, stmtUnreachable, stmtBreak, stmtContinue, stmtExit);
+  TStmtAttribute = (
+      stmtNoReturn, // This statement makes the function unable to return, such as raise, or call a function with fmNoreturn
+      stmtUnreachable, // This statement cannot be reached
+      stmtBreak, stmtContinue, stmtExit
+  );
   TStmtAttributes = set
     of TStmtAttribute;
 
@@ -1048,6 +1417,7 @@ type
     Data: Pointer;
     Attr: TStmtAttributes;
     property StmtKind: TStmtKind read FStmtKind;
+    //    function IsParent
   end;
 
   TStatementClass = class of TStatement;
@@ -1071,6 +1441,8 @@ type
     constructor Create; override;
   end;
 
+  //  TStmtLabel = class;
+
   TLabeledStmt = class(TStatement)
   public
     LabelSym: TStmtLabel;
@@ -1079,6 +1451,7 @@ type
 
   TStmtLabel = class(TSymbol)
   public
+    // The property Name has been declared in TSymbol
     Stmt: TLabeledStmt;
     constructor Create; override;
   end;
@@ -1093,13 +1466,14 @@ type
   public
     Value: TExpr;
     TrueStmt: TStatement;
-    FalseStmt: TStatement;
+    FalseStmt: TStatement; // may be nil
     constructor Create; override;
   end;
 
   TForStmt = class(TStatement)
   public
-    Value: TSymbol;
+    Value: TSymbol; // TVariable, TFuncParam
+//    ValueExpr: TSymbolExpr;
     Down: boolean;
     Start: TExpr;
     Stop: TExpr;
@@ -1109,7 +1483,7 @@ type
 
   TGotoStmt = class(TStatement)
   public
-    StmtLabel: TStmtLabel;
+    StmtLabel: TStmtLabel; // may be nil
     constructor Create; override;
   end;
 
@@ -1143,6 +1517,7 @@ type
   private
     FCount: integer;
   public
+    //SelectorList: TList;
     Expr: TExpr;
     Selectors: array of TCaseSelector;
     Default: TCompoundStmt;
@@ -1161,6 +1536,10 @@ type
     Stmt: TCompoundStmt;
     constructor Create; override;
   end;
+
+  {  TWithStmt = class(TStatement)
+    public
+    end;}
 
   TExceptHandler = class
   public
@@ -1192,7 +1571,7 @@ type
 
   TRaiseStmt = class(TStatement)
   public
-    Expr: TExpr;
+    Expr: TExpr;  // a call expr or variable expr, can be null
     constructor Create; override;
   end;
 
@@ -1207,13 +1586,20 @@ type
     constructor Create(AOwner: TSymbol);
     function GetStart(const S: TSymString): TSymbolPosition;
     function GetNext(var Pos: TSymbolPosition): TSymbol;
+    // find symbol
     function Find(const S: TSymString): TSymbol; overload;
+    // Find the unit to which M is the symbol
     function Find(M: TModule; const S: TSymString): TSymbol; overload;
+    // Add symbol, if the name already exists, return true, otherwise return false
     function Add(Sym: TSymbol): boolean;
     function AddOvrld(Sym: TFunctionDecl): boolean;
+    // empty
     procedure Clear(FreeSym: boolean = False);
+    // Take by index
     property Item[Index: integer]: TSymbol read GetSymbol; default;
+    // belong
     property Owner: TSymbol read FOwner;
+    // Automatically added to Owner
     property AutoAddToOwner: boolean read FAutoAddToOwner write FAutoAddToOwner;
   end;
 
@@ -1226,28 +1612,86 @@ type
 function FindDirective(const S: TSymString): TDirectiveIdent;
 
 const
-  OpKinds: array[TExprOpCode] of TExprOpKind =
-    (opkNone, opkBinary, opkBinary, opkBinary, opkBinary, opkBinary, opkBinary, opkBinary, opkBinary,
-    opkBinary, opkBinary, opkBinary, opkBinary,
-    opkBinary, opkBinary, opkBinary, opkBinary, opkBinary, opkBinary, opkBinary, opkBinary,
-    opkBinary, opkBinary, opkBinary, opkBinary, opkBinary, opkBinary, opkBinary, opkUnary, opkUnary,
-    opkUnary, opkUnary, opkUnary, opkList, opkUnary, opkUnary, opkUnary, opkUnary, opkConst, opkConst,
-    opkSymbol);
-  ExprKinds: array[TExprOpCode] of shortint =
-    (0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1,
-    1, 1, 1, 5, 1, 1, 1, 1, 3, 3, 4);
-  TypeNames: array[TTypeCode] of
-    string = ('unknown', 'untype', 'Integer', 'Real', 'Boolean', 'Char', 'Pointer', 'PAnsiChar',
-    'PWideChar', 'String', 'Variant', 'file', 'Text', 'procedural', 'record', 'object', 'class',
-    'interface', 'classref', 'enum', 'set', 'subrange', 'array', 'dynamicarray', 'unitscope',
-    'alias', 'clonetype', 'openarray', 'vector');
-  IntTypeNames: array[TIntKind] of string =
-    ('Shortint', 'Byte', 'Smallint', 'Word', 'Longint', 'LongWord', 'Int64', 'UInt64');
-  NumericTypeNames: array[TNumericKind] of string = ('Single', 'Double', 'Extended', 'Currency', 'Comp', 'Real48');
-  BoolTypeNames: array[TBoolKind] of string = ('Boolean', 'ByteBool', 'WordBool', 'LongBool');
-  CharTypeNames: array[TCharKind] of string = ('AnsiChar', 'WideChar');
-  StringTypeNames: array[TStringKind] of string =
-    ('AnsiString', 'WideString', 'UnicodeString', 'ShortString', 'WShortString');
+  OpKinds: array[TExprOpCode] of TExprOpKind = (
+    // opNONE
+    opkNone,
+    // opNE,      opEQ,      opLT,      opLE,      opGT,      opGE,      opIN,      opIS,      opAS,
+       opkBinary, opkBinary, opkBinary, opkBinary, opkBinary, opkBinary, opkBinary, opkBinary, opkBinary,
+    // opADD,     opSUB,     opOR,      opXOR,
+       opkBinary, opkBinary, opkBinary, opkBinary,
+    // opMUL,     opFDIV,    opIDIV,    opMOD,     opAND,     opSHL,     opSHR,
+       opkBinary, opkBinary, opkBinary, opkBinary, opkBinary, opkBinary, opkBinary,
+    // opMEMBER,  opCAST,    opCALL,    opRANGE,
+       opkBinary, opkBinary, opkBinary, opkBinary,
+    // opINDEX,    opASSIGN,  opFMT,     opNOT,    opNEG,    opPOS,
+       opkBinary,  opkBinary, opkBinary, opkUnary, opkUnary, opkUnary,
+    // opINHERITED, opSET,    opLIST,  opADDR,   opDBLADDR, opINST,   opDISPCALL,
+       opkUnary,    opkUnary, opkList, opkUnary, opkUnary,  opkUnary, opkUnary,
+    // opNIL,    opCONST,  opSYMBOL
+       opkConst, opkConst, opkSymbol
+  );
+  ExprKinds: array[TExprOpCode] of shortint = (
+  // opNONE
+      0,
+  // opNE, opEQ, opLT, opLE, opGT, opGE, opIN, opIS, opAS,
+      2,    2,    2,    2,    2,    2,    2,    2,    2,
+  // opADD, opSUB, opOR, opXOR,
+      2,     2,     2,    2,
+  // opMUL, opFDIV, opIDIV, opMOD, opAND, opSHL, opSHR,
+      2,     2,      2,      2,     2,     2,     2,
+  // opMEMBER,  opCAST, opCALL, opRANGE,
+      2,         2,      2,      2,
+  // opINDEX, opASSIGN, opFMT, opNOT, opNEG, opPOS,
+      2,         2,       2,     1,    1,     1,
+  // opINHERITED, opSET, opLIST, opADDR, opDBLADDR, opINST, opDISPCALL,
+      1,           1,     5,      1,      1,        1,      1,
+  // opNIL, opCONST, opSYMBOL
+      3,     3,      4
+  );
+  TypeNames: array[TTypeCode] of string = (
+    // typUnknown, typUntype,
+    'unknown', 'untype',
+    // typInt, typNumeric,
+    'Integer', 'Real',
+    // typBool
+    'Boolean',
+    // typChar
+    'Char',
+    // typPointer, typPAnsiChar, typPWideChar,
+    'Pointer', 'PAnsiChar', 'PWideChar',
+    // typString
+    'String',
+    // typVariant,
+    'Variant',
+    // typFile, typText,
+    'file', 'Text',
+    // typProcedural,
+    'procedural',
+    // typRecord, typObject, typClass, typInterface,  typClassRef,
+    'record', 'object', 'class', 'interface', 'classref',
+    // typEnum, typSet, typSubrange, typArray, typDynamicArray
+    'enum', 'set', 'subrange', 'array', 'dynamicarray',
+    'unitscope', 'alias', 'clonetype', 'openarray', 'vector'
+  );
+  IntTypeNames: array[TIntKind] of string = (
+  // intS8,     intU8,  intS16,     intU16, intS32,    intU32,     intS64,  intU64
+    'Shortint', 'Byte', 'Smallint', 'Word', 'Longint', 'LongWord', 'Int64', 'UInt64'
+  );
+  NumericTypeNames: array[TNumericKind] of string = (
+  // numSingle, numDouble, numExtended, numCurrency, numComp, numReal48
+    'Single', 'Double', 'Extended', 'Currency', 'Comp', 'Real48'
+  );
+  BoolTypeNames: array[TBoolKind] of string = (
+    // bolStd, bolByte, bolWord, bolLong
+    'Boolean', 'ByteBool', 'WordBool', 'LongBool'
+  );
+  CharTypeNames: array[TCharKind] of string = (
+    'AnsiChar', 'WideChar'
+  );
+  StringTypeNames: array[TStringKind] of string = (
+  // strAnsi, strWide, strUnicode, strAShort, strWShort
+    'AnsiString', 'WideString', 'UnicodeString', 'ShortString', 'WShortString'
+  );
   AutoInitTypes = [typString, typVariant, typInterface, typDynamicArray];
   AutoFreeTypes = [typString, typVariant, typInterface, typDynamicArray];
 
@@ -1273,7 +1717,9 @@ procedure ValFromInt(var V: TValueRec; I: integer); overload;
 procedure ValFromInt(var V: TValueRec; I: int64); overload;
 procedure ValFromCurr(var V: TValueRec; I: currency); overload;
 procedure ValFromReal(var V: TValueRec; R: real); overload;
+// Convert Ansi string to TValueRec
 procedure ValFromRawStr(var V: TValueRec; const S: ansistring); overload;
+// Convert Utf8 string to TValueRec
 procedure ValFromStr(var V: TValueRec; const S: UTF8String); overload;
 procedure ValFromWStr(var V: TValueRec; const S: WideString); overload;
 procedure ValFromSet(var V: TValueRec; S: TSetValue); overload;
@@ -1282,6 +1728,7 @@ procedure ValFromPtr(var V: TValueRec; P: Pointer); overload;
 procedure ValFromSymbol(var V: TValueRec; Sym: TSymbol); overload;
 procedure ValFromAddrOffset(var V: TValueRec; Sym: TSymbol; Offset: integer);
 procedure ValFromIID(var V: TValueRec; Intf: TInterfaceType);
+// Assign a default value to V according to typ
 procedure ValDefault(var V: TValueRec; typ: TType);
 function ValIsClear(const V: TValueRec): boolean;
 procedure ValCopy(var Dest: TValueRec; const Source: TValueRec); overload;
@@ -1292,12 +1739,16 @@ function ValToInt64(const V: TValueRec): int64;
 function ValToBool(const V: TValueRec): boolean;
 function ValToReal(const V: TValueRec): real;
 function ValToCurr(const V: TValueRec): currency;
+// return AnsiString
 function ValToRawStr(const V: TValueRec): ansistring;
+// For vtStr, return a string in Utf8 format
 function ValToStr(const V: TValueRec): UTF8String;
 function ValToWStr(const V: TValueRec): WideString;
 function ValToSet(const V: TValueRec): TSetValue;
 function ValToPtr(const V: TValueRec): Pointer;
 function ValGetAddrOffset(const V: TValueRec; out Sym: TSymbol): Integer;
+//function ValToChar(const V: TValueRec): Char;
+// not implemented
 function ValToVar(const V: TValueRec): variant;
 function ValOp(const v1, v2: TValueRec; op: TExprOpCode): TValueRec;
 function ValCmp(const v1, v2: TValueRec; op: TExprOpCode): TValueRec;
@@ -1316,13 +1767,46 @@ function ValSucc(const V: TValueRec): TValueRec;
 function ValSwap(const V: TValueRec; typ: TIntType): TValueRec;
 function ValTrunc(const V: TValueRec): TValueRec;
 function ValIsCompatible(const V: TValueRec; typ: TType): boolean;
-function TypIsVariantCompatible(typ: TType): boolean;
-function TypIsVariantArithCompatible(typ: TType): boolean;
-function TypIsStringArithCompatible(typ: TType): boolean;
+// type helper
+// Is the type compatible with Variant
+function TypIsVariantCompatible(typ: TType): Boolean;
+// Whether the type can be operated with Variant
+function TypIsVariantArithCompatible(typ: TType): Boolean;
+// Whether the type can be operated with String
+function TypIsStringArithCompatible(typ: TType): Boolean;
 
 implementation
 
 uses Math, err;
+
+
+//var
+//  typSizes: array[TTypeCode] of Integer = (
+//    // typUnknown, typUntype,
+//    0, 0,
+//    // typShortint, typByte, typSmallint, typWord, typLongint, typLongWord, typInt64, typUInt64,
+//    1, 1, 2, 2, 4, 4, 8, 8,
+//    // typComp, typReal48, typSingle, typDouble, typExtended, typCurrency,
+//    8, 6, 4, 8, 10, 8,
+//    // typBoolean, typByteBool, typWordBool, typLongBool,
+//    1, 1, 2, 4,
+//    // typAnsiChar, typWideChar,
+//    1, 2,
+//    // typPointer, typPAnsiChar, typPWideChar,
+//    4, 4, 4,
+//    // typAnsiString, typWideString, typUnicodeString, typShortString,
+//    4, 4, 4, 255,
+//    // typVariant, typOleVariant,
+//    16, 16,
+//    // typFile, typTextFile,
+//    4, 4,
+//    // typProcedure, typFunction,
+//    4, 4,
+//    // typRecord, typObject, typClass, typInteface, typDispReserved, typClassRef,
+//    0, 0, 0, 4, 4, 4,
+//    // typEnum, typSet, typSubrange, typArray, typDynamicArray
+//    1, 0, 1, 0, 0
+//  );
 
 procedure ValCastErr;
 begin
@@ -1347,6 +1831,7 @@ begin
     vtSet: TSetValue(V.VSet).Free;
     vtArray: TArrayValue(V.VSet).Free;
     vtRecord: TRecordValue(V.VSet).Free;
+    //    vtAddrOffset: TAddressOffset(V.VOffset).Free;
   end;
   V.VT := vtEmpty;
 end;
@@ -1464,8 +1949,7 @@ procedure ValFromWChar(var V: TValueRec; C: widechar);
 begin
   ValClear(V);
   V.VT := vtWChr;
-  V.VWChr :=
-    word(C);
+  V.VWChr := word(C);
 end;
 
 procedure ValFromInt(var V: TValueRec; I: integer);
@@ -1805,6 +2289,17 @@ begin
   end;
 end;
 
+//function ValToChar(const V: TValueRec): Char;
+//begin
+//  if V.VT = vtStr then
+//  begin
+//    if (V.VStr <> nil) and (Length(String(V.VStr)) > 0) then
+//      Result := String(V.VStr)[1]
+//    else
+//      Result := #0;
+//  end;
+//end;
+
 function ValToVar(const V: TValueRec): variant;
 begin
 {$ifdef fpc}
@@ -1894,6 +2389,14 @@ function ValOp(const v1, v2: TValueRec; op: TExprOpCode): TValueRec;
     end;
   end;
 
+  {function _ValToStr(const V: TValueRec): string;
+  begin
+    if V.VT = vtInt then      // vtInt 视为char
+      Result := Chr(V.VInt)
+    else
+      Result := ValToStr(V);
+  end;}
+
   function StrOp(const Left, Right: TValueRec; Op: TExprOpCode): TValueRec;
   begin
     if Op = opADD then
@@ -1927,17 +2430,20 @@ function ValOp(const v1, v2: TValueRec; op: TExprOpCode): TValueRec;
   end;
 
 const
-  OpMap: array[vtEmpty..vtWChr, vtEmpty..vtWChr] of
-    TBaseType = ((btInt, btInt, btI64, btFlt, btCur, btSet, btBol, btStr, btStr, btStr, btStr),
-    (btInt, btInt, btI64, btFlt, btCur, btErr, btErr, btErr, btErr, btErr, btErr), (btI64, btI64, btI64,
-    btFlt, btCur, btErr, btErr, btErr, btErr, btErr, btErr), (btFlt, btFlt, btFlt, btFlt,
-    btFlt, btErr, btErr, btErr, btErr, btErr, btErr), (btCur, btCur, btCur, btFlt, btCur, btErr, btErr, btErr,
-    btErr, btErr, btErr), (btSet, btErr, btErr, btErr, btErr, btSet, btErr, btErr, btErr, btErr, btErr),
-    (btBol, btErr, btErr, btErr, btErr, btErr, btBol, btErr, btErr, btErr, btErr),
-    (btStr, btStr, btErr, btErr, btErr, btErr, btErr, btStr, btStr, btStr, btStr), (btStr, btErr, btErr, btErr,
-    btErr, btErr, btErr, btStr, btStr, btStr, btStr), (btErr, btErr, btErr, btErr, btErr,
-    btErr, btErr, btStr, btStr, btStr, btStr), (btErr, btErr, btErr, btErr, btErr, btErr, btErr, btStr, btStr,
-    btStr, btStr));
+  OpMap: array[vtEmpty..vtWChr, vtEmpty..vtWChr] of TBaseType = (
+       // vtEmpty,  vtInt, vtInt64, vtReal, vtCurr, vtSet, vtBool, vtStr, vtWStr, vtAChr, vtWChr
+{vtEmpty} (btInt,   btInt, btI64,   btFlt,  btCur,  btSet, btBol,  btStr, btStr,  btStr,  btStr),
+{vtInt}   (btInt,   btInt, btI64,   btFlt,  btCur,  btErr, btErr,  btErr, btErr,  btErr,  btErr),
+{vtInt64} (btI64,   btI64, btI64,   btFlt,  btCur,  btErr, btErr,  btErr, btErr,  btErr,  btErr),
+{vtReal}  (btFlt,   btFlt, btFlt,   btFlt,  btFlt,  btErr, btErr,  btErr, btErr,  btErr,  btErr),
+{vtCurr}  (btCur,   btCur, btCur,   btFlt,  btCur,  btErr, btErr,  btErr, btErr,  btErr,  btErr),
+{vtSet}   (btSet,   btErr, btErr,   btErr,  btErr,  btSet, btErr,  btErr, btErr,  btErr,  btErr),
+{vtBool}  (btBol,   btErr, btErr,   btErr,  btErr,  btErr, btBol,  btErr, btErr,  btErr,  btErr),
+{vtStr}   (btStr,   btStr, btErr,   btErr,  btErr,  btErr, btErr,  btStr, btStr,  btStr,  btStr),
+{vtWStr}  (btStr,   btErr, btErr,   btErr,  btErr,  btErr, btErr,  btStr, btStr,  btStr,  btStr),
+{vtAChr}  (btErr,   btErr, btErr,   btErr,  btErr,  btErr, btErr,  btStr, btStr,  btStr,  btStr),
+{vtWChr}  (btErr,   btErr, btErr,   btErr,  btErr,  btErr, btErr,  btStr, btStr,  btStr,  btStr)
+  );
 
   function SimpleOp(const L, R: TValueRec; OpCode: TExprOpCode): TValueRec;
   begin
@@ -2039,16 +2545,20 @@ type
   end;
 
 const
-  OpMap: array[vtEmpty..vtWChr, vtEmpty..vtWChr] of TBaseType = ((
-    btInt, btInt, btI64, btFlt, btCur, btSet, btBol, btStr, btStr, btStr, btStr),
-    (btInt, btInt, btI64, btFlt, btCur, btErr, btErr, btErr, btErr, btErr, btErr), (btI64, btI64, btI64, btFlt, btCur,
-    btErr, btErr, btErr, btErr, btErr, btErr), (btFlt, btFlt, btFlt, btFlt, btFlt, btErr,
-    btErr, btErr, btErr, btErr, btErr), (btCur, btCur, btCur, btFlt, btCur, btErr, btErr, btErr, btErr, btErr,
-    btErr), (btSet, btErr, btErr, btErr, btErr, btSet, btErr, btErr, btErr, btErr, btErr),
-    (btBol, btErr, btErr, btErr, btErr, btErr, btBol, btErr, btErr, btErr, btErr), (btStr, btErr, btErr,
-    btErr, btErr, btErr, btErr, btStr, btStr, btStr, btStr), (btStr, btErr, btErr, btErr,
-    btErr, btErr, btErr, btStr, btStr, btStr, btStr), (btStr, btErr, btErr, btErr, btErr, btErr, btErr, btStr,
-    btStr, btStr, btStr), (btStr, btErr, btErr, btErr, btErr, btErr, btErr, btStr, btStr, btStr, btStr));
+  OpMap: array[vtEmpty..vtWChr, vtEmpty..vtWChr] of TBaseType = (
+       // vtEmpty,  vtInt, vtInt64, vtReal, vtCurr, vtSet, vtBool, vtStr, vtWStr, vtAChr, vtWChr
+{vtEmpty} (btInt,   btInt, btI64,   btFlt,  btCur,  btSet, btBol, btStr,  btStr,  btStr,  btStr),
+{vtInt}   (btInt,   btInt, btI64,   btFlt,  btCur,  btErr, btErr, btErr,  btErr,  btErr,  btErr),
+{vtInt64} (btI64,   btI64, btI64,   btFlt,  btCur,  btErr, btErr, btErr,  btErr,  btErr,  btErr),
+{vtReal}  (btFlt,   btFlt, btFlt,   btFlt,  btFlt,  btErr, btErr, btErr,  btErr,  btErr,  btErr),
+{vtCurr}  (btCur,   btCur, btCur,   btFlt,  btCur,  btErr, btErr, btErr,  btErr,  btErr,  btErr),
+{vtSet}   (btSet,   btErr, btErr,   btErr,  btErr,  btSet, btErr, btErr,  btErr,  btErr,  btErr),
+{vtBool}  (btBol,   btErr, btErr,   btErr,  btErr,  btErr, btBol, btErr,  btErr,  btErr,  btErr),
+{vtStr}   (btStr,   btErr, btErr,   btErr,  btErr,  btErr, btErr, btStr,  btStr,  btStr,  btStr),
+{vtWStr}  (btStr,   btErr, btErr,   btErr,  btErr,  btErr, btErr, btStr,  btStr,  btStr,  btStr),
+{vtAChr}  (btStr,   btErr, btErr,   btErr,  btErr,  btErr, btErr, btStr,  btStr,  btStr,  btStr),
+{vtWChr}  (btStr,   btErr, btErr,   btErr,  btErr,  btErr, btErr, btStr,  btStr,  btStr,  btStr)
+  );
 var
   CmpRet: TCmpResult;
   Ret: boolean;
@@ -2369,6 +2879,7 @@ function TSymbol.GetFullName: TSymString;
 var
   Sym: TSymbol;
 begin
+  // Take the fully qualified name of the symbol
   Result := '';
   Sym := Self;
   while Sym <> nil do
@@ -2396,6 +2907,7 @@ function TSymbol.GetSymName: TSymString;
 var
   Sym: TSymbol;
 begin
+  // Take the symbolic qualified name, not including the module name
   Result := '';
   Sym := Self;
   while Sym <> nil do
@@ -2552,19 +3064,34 @@ const
   IntBtcMaps: array[TIntKind] of TBaseTypeCode =
     (btcShortint, btcByte, btcSmallint, btcWord, btcLongint, btcLongWord, btcInt64, btcUInt64);
   NumBtcMaps: array[TNumericKind] of TBaseTypeCode =
+    // numSingle, numDouble, numExtended, numCurrency, numComp, numReal48
     (btcSingle, btcDouble, btcExtended, btcCurrency, btcComp, btcReal48);
   CharBtcMaps: array
     [TCharKind] of TBaseTypeCode = (btcAnsiChar, btcWideChar);
   BoolBtcMaps: array[TBoolKind] of TBaseTypeCode = (btcBoolean, btcByteBool, btcWordBool, btcLongBool);
-  StrBtcMaps: array
-    [TStringKind] of TBaseTypeCode = (btcAnsiString, btcWideString, btcUnicodeString, btcShortString, btcWShortString);
+  StrBtcMaps: array [TStringKind] of TBaseTypeCode =
+    //strAnsi, strWide, strUnicode, strAShort, strWShort
+    (btcAnsiString, btcWideString, btcUnicodeString, btcShortString, btcWShortString);
   VarBtcMaps: array[boolean] of TBaseTypeCode = (btcVariant, btcOleVariant);
   IntfBtcMaps: array[boolean] of TBaseTypeCode = (btcInterface, btcDispInterface);
-  BtcMaps: array[TTypeCode] of TBaseTypeCode =
-    (btcUnknown, btcUntype, btcLongint, btcDouble, btcBoolean, btcAnsiChar, btcPointer, btcPAnsiChar,
-    btcPWideChar, btcAnsiString, btcVariant, btcFile, btcText, btcProcedural, btcRecord, btcObject,
-    btcClass, btcInterface, btcClassRef, btcEnum, btcSet, btcSubrange, btcArray, btcDynamicArray,
-    btcUnknown, btcUnknown, btcUnknown, btcOpenArray, btcUnknown);
+  BtcMaps: array[TTypeCode] of TBaseTypeCode = (
+  // typUnknown, typUntype,
+      btcUnknown, btcUntype,
+  // typInt, typNumeric, typBool, typChar,
+      btcLongint, btcDouble, btcBoolean, btcAnsiChar,
+  // typPointer, typPAnsiChar, typPWideChar,
+      btcPointer, btcPAnsiChar, btcPWideChar,
+  // typString, typVariant,
+      btcAnsiString, btcVariant,
+  // typFile, typText, typProcedural,
+      btcFile, btcText, btcProcedural,
+  // typRecord, typObject, typClass, typInterface, typClassRef,
+      btcRecord, btcObject, btcClass, btcInterface, btcClassRef,
+  // typEnum, typSet, typSubrange, typArray, typDynamicArray,
+      btcEnum, btcSet, btcSubrange, btcArray, btcDynamicArray,
+  // typSymbol, typAlias, typClonedType, typOpenArray, typVector
+      btcUnknown, btcUnknown, btcUnknown, btcOpenArray, btcUnknown
+  );
 begin
   case TypeCode of
     typInt: Result := IntBtcMaps[TIntType(Self).Kind];
@@ -3050,6 +3577,10 @@ procedure TArrayType.Update;
 var
   T: TType;
 begin
+  // If it is a packed record, it does not need to be arranged according to
+  // the maximum alignment in the record, as long as it is arranged closely
+  // If it is not a packed record, then its size has been corrected according
+  // to the maximum alignment, as long as it is tightly arranged
   if not Assigned(ElementType) then
     FSize := 0
   else
@@ -3116,6 +3647,7 @@ begin
     FSize := 4;
     Exit;
   end;
+  // DONE 1: need to be modified, for example, my=(a,b=255) only needs 1 byte
   if FLowValue < 0 then
   begin
     if FHighValue > 32767 then
@@ -3291,7 +3823,7 @@ end;
 
 function TProperty.HasIndexSpec: boolean;
 begin
-  Result := Index <> -2147483647 - 1;
+  Result := Index <> -2147483647 - 1; // d7 bug: -2147483648 report overflow
 end;
 
 function TProperty.ParamCount: integer;
@@ -3398,6 +3930,8 @@ begin
     Result := Size
   else
     Result := Off + int64(Size);
+  // if Result <= $7fffffff then
+  // todo 1: MaxAlignSize should be changed to the smallest between GlobalAlizeSize and MaxAlignSize
   Result := (Result + MaxAlignSize - 1) and not (MaxAlignSize - 1);
 end;
 
@@ -3407,7 +3941,7 @@ procedure TRecordBody.Update(GlobalAlignSize: byte; Offset: cardinal);
   var
     AlSize: byte;
   begin
-    if Offset > $7fffffff then
+    if Offset > $7fffffff then  // Once larger than 2GB, no need to calculate
     begin
       F.Offset := Offset;
       Exit;
@@ -3446,6 +3980,7 @@ begin
   VarPart := Variants;
   if VarPart <> nil then
   begin
+    // The MaxAlignSize of the variant part of the same group is the same
     AlignTo(Offset, VarPart.MaxAlignSize);
     while
       VarPart <> nil do
@@ -3468,6 +4003,7 @@ begin
     VarPart.UpdateAlign;
     VarPart := VarPart.Next;
   end;
+  // Take the largest Align
   Align := 1;
   for I := 0 to Members.Count - 1 do
     with TField(Members[I]).FieldType do
@@ -3478,6 +4014,7 @@ begin
       if AlignSize > Align then
         Align := AlignSize;
   MaxAlignSize := Align;
+  // Take the largest Align of the variant part
   Align := 1;
   VarPart := Variants;
   while
@@ -3487,6 +4024,8 @@ begin
       Align := VarPart.MaxAlignSize;
     VarPart := VarPart.Next;
   end;
+  // The same set of variants share the same memory, so they should also have the same Align
+  // Use the largest Align uniformly
   VarPart := Variants;
   while VarPart <> nil do
   begin
@@ -3723,6 +4262,7 @@ function TClassType.GetAllSymbols: TSymbolTable;
   end;
 
 begin
+  // todo 1: How to solve the problem of duplicate names
   if not Assigned(FAllSymbols) then
   begin
     FAllSymbols := TSymbolTable.Create(nil);
@@ -3792,6 +4332,7 @@ function TClassType.IsInheritedFrom(ABase: TClassType): boolean;
 var
   C: TClassType;
 begin
+  //C := Self.Base;
   C := Self;
   while Assigned(C) and (C <> ABase) do
     C := C.Base;
@@ -3816,7 +4357,7 @@ var
   var
     AlSize: byte;
   begin
-    if Offset > $7fffffff then
+    if Offset > $7fffffff then // Once larger than 2GB, no need to calculate
     begin
       F.Offset := Offset;
       Exit;
@@ -3855,6 +4396,8 @@ var
 begin
   if Base = nil then
   begin
+    // todo 77: MARK root class
+    // The base class has no fields, only a vmt pointer
     ObjectSize := PtrSize;
     VmtEntryCount := ROOT_VMT_OFFSET;
     SetLength(Vmt, VmtEntryCount);
@@ -3879,7 +4422,9 @@ begin
   end;
   if InterfaceCount > 0 then
   begin
+    // aligned to pointer
     Offset := (Offset + PtrSize - 1) and not (PtrSize - 1);
+    // Interface entries
     for i := 0 to InterfaceCount - 1 do
     begin
       IntfEntries[i].FOffset := Offset;
@@ -3892,6 +4437,7 @@ begin
     ObjectSize := (Offset + MaxAlign - 1) and not (MaxAlign - 1)
   else
     ObjectSize := Offset;
+  // calc VMT
   VmtEntryCount := Base.VmtEntryCount;
   for i := 0 to Symbols.Count - 1 do
   begin
@@ -3920,6 +4466,7 @@ begin
       begin
         Meth := TMethod(Sym);
         if not (saStatic in Meth.Attr) and (fmVirtual in Meth.Modifiers) then
+        //    and ([fmVirtual, fmOverride] * Meth.Modifiers = [fmVirtual]) then
         begin
           idx := Meth.VTIndex + ROOT_VMT_OFFSET;
           if (idx >= 0) and (idx < VmtEntryCount) then
@@ -3930,6 +4477,7 @@ begin
       end;
     end;
   end;
+  // init table
 end;
 
 constructor TSubrangeType.Create;
@@ -3937,6 +4485,11 @@ begin
   inherited;
   FTypeCode := typSubrange;
 end;
+
+{destructor TSubrangeType.Destroy;
+begin
+  inherited;
+end;}
 
 procedure TSubrangeType.SetBaseType(const Value: TType);
 begin
@@ -4267,7 +4820,7 @@ var
   var
     AlSize: byte;
   begin
-    if Offset > $7fffffff then
+    if Offset > $7fffffff then // Once larger than 2GB, no need to calculate
     begin
       F.Offset := Offset;
       Exit;
@@ -4292,6 +4845,16 @@ var
   Offset: int64;
   Sym: TSymbol;
 begin
+{ for i := 0 to Symbols.Count - 1 do
+  begin
+    Sym := Symbols[i];
+    if Sym.NodeKind = nkMethod then
+      if fmVirtual in TFunctionDecl(Sym).Modifiers then
+      begin
+        Include(ObjectAttr, oaHasVirtual);
+        Break;
+      end;
+  end;}
   if Assigned(Base) then
     BaseVmt := Base.VmtEntryCount
   else
@@ -4334,10 +4897,13 @@ begin
     if Sym.NodeKind = nkField then
       UpdateField(TField(Sym), Offset);
   end;
+  // add vmt
   if oaBeginVmt in ObjectAttr then
   begin
+    // align pointer first
     Offset := (Offset + PtrSize - 1) and not (PtrSize - 1);
     VmtOffset := Offset;
+    // add the vmt pointer
     Offset := Offset + PtrSize;
   end;
   if MaxAlign > GlobalAlignSize then
@@ -4483,6 +5049,7 @@ begin
         TSymbolExpr(Self) do
         Result := (Reference.NodeKind in ExpectedKinds) or ((Reference.NodeKind = nkVariable) and
           not (vaSelf in TVariable(Reference).VarAttr));
+        //Result := (TSymbolExpr(Self).Reference.NodeKind in ExpectedKinds);
     end;
     opMEMBER: if TBinaryExpr(Self).Right <> nil then
         Result := TBinaryExpr(Self).Right.HasMemory
@@ -4491,6 +5058,10 @@ begin
     opINDEX: Result := TBinaryExpr(Self).Left.HasMemory;
     opINST: Result := True;
     opCAST: Result := eaVarCast in Self.Attr;
+    {with TBinaryExpr(Self) do
+      begin
+        Result := Right.HasMemory;
+      end;}
     else
       Result := False;
   end;
@@ -4705,6 +5276,7 @@ begin
     Exit;
   if (Value <> nil) and (Value.Parent <> nil) then
     Value.Parent.Remove(Value);
+  //  raise EASTError.Create('expr has in use');
   if FLeft <> nil then
     FLeft.FParent := nil;
   FLeft := Value;
@@ -4718,6 +5290,7 @@ begin
     Exit;
   if (Value <> nil) and (Value.Parent <> nil) then
     Value.Parent.Remove(Value);
+  //  raise EASTError.Create('expr has in use');
   if FRight <> nil then
     FRight.FParent := nil;
   ;
@@ -4728,6 +5301,7 @@ end;
 
 procedure TListExpr.Add(E: TExpr);
 begin
+  //  if E.Parent <>  nil then raise EASTError.Create('expr is in use');
   if E.Parent = Self then
     raise EASTError.Create('expr is in use');
   if Count >= Length(Items) then
@@ -4774,6 +5348,7 @@ procedure TListExpr.Insert(Index: integer; E: TExpr);
 var
   i: integer;
 begin
+  //  if E.Parent <>  nil then raise EASTError.Create('expr is in use');
   if E.Parent = Self then
     raise EASTError.Create('expr is in use');
   if (Index < 0) or (Index > Count) then
@@ -5058,6 +5633,7 @@ end;
 
 procedure TFunctionDecl.CreateProceduralType;
 begin
+  // todo 1: Idea: These attached types must have a name for easy storage
   FProcType := TProceduralType.Create;
   if Self.Params <> nil then
   begin
@@ -5317,8 +5893,7 @@ begin
     Bits[I] := Bits[I] and not (1 shl Offset);
 end;
 
-procedure TSetValue.
-SetRange(Lo, Hi: byte; Value: boolean);
+procedure TSetValue.SetRange(Lo, Hi: byte; Value: boolean);
 var
   i: integer;
 begin
@@ -5443,6 +6018,7 @@ begin
   end;
   FElementType := typ.ElementType;
   FElementCount := GetElementCount;
+  // Alloc memory block
   LCount := SizeOf(TValueRec) * int64(FElementCount);
   if LCount > MaxInt then
     Assert(False, 'Array too large');
@@ -5585,6 +6161,21 @@ begin
   ValClear(DefaultValue);
   inherited;
 end;
+
+{function TFuncParam.GetArgKind: TArgumentKind;
+begin
+  if ArgType.TypeCode = typOpenArray then
+  begin
+    if TOpenArrayType(ArgType).ElementType = nil then
+      Result := akArrayOfConst
+    else
+      Result := akArrayOfType
+  end
+  else if ArgType.TypeCode = typUntype then
+    Result := akUntype
+  else
+    Result := akNormal;
+end;}
 
 function TFuncParam.IsReadOnly: boolean;
 begin
