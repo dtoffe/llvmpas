@@ -9,6 +9,17 @@ interface
 
 uses Classes, SysUtils, lex, ast, cntx, hashtable;
 
+{
+need to add:
+1. StrictImplicitCast strict implicit conversion (conversion between various ints,
+     And assigning untyped pointers to typed pointers and class, classref, dynamicarray)
+2. The initial value of local variables
+3. inline
+4. Combine constants in CheckExpr (completed)
+5. Improve with statement: a with statement can carry multiple identification lists,
+     The latter identifier can be a member of the previous identifier.
+}
+
 const
   MAX_UNGET = 7;
 
@@ -16,7 +27,10 @@ type
   TParseState = (psInIntfSect, psInImplSect, psInClass, psInRecord, psInObject, psInIntf,
     psInDispIntf, psInFunc, psInType, psInVar,
     psInField, psInAccessor, psInPacked, psInLeftVal, psInClassPrefix, psInWhileStmt, psInForStmt,
-    psInForEachStmt, psInRepeatStmt, psInFuncBody, psInTypeExpr, psInConstExpr, psNotAllowAddr, psStopOnErr);
+    psInForEachStmt, psInRepeatStmt, psInFuncBody,
+    psInTypeExpr, // currently in type expression
+    psInConstExpr, // The current semantics requires a constant expression.
+    psNotAllowAddr, psStopOnErr);
   TParseStates = set of TParseState;
 
   TParseStateInfo = record
@@ -81,8 +95,10 @@ type
     FWithList: TFPList;
     FCurOverloadFunc: TFunctionDecl;
     FCurSymbolPos: TSymbolPosition;
+    // In the non-public part: implementation section such as program or unit
     FInternalSection: boolean;
     FSyntaxOptions: TSyntaxOptions;
+    // UngetToken support:
     FTokenBuffer: array[0..MAX_UNGET] of TTokenInfo;
     FTokenIndex, FTokenHead: smallint;
     FCurVisibility: TMemberVisibility;
@@ -103,8 +119,11 @@ type
     procedure OnScannerIfEval(out IsDefined: boolean);
     procedure InitAstNode(ANode: TAstNode);
     procedure InitExpr(Expr: TExpr);
+    // Add a symbol of a unit to the ExternSymbols list
     procedure AddSymbols(M: TModule);
+    // Add to the symbol table of the current Scope
     function AddSymbol(Sym: TSymbol): boolean; {$IFNDEF DEBUG}inline;{$ENDIF}
+    // current symbol table
     function CurSymbols: TSymbolTable;
     procedure EnterScope(SymTable: TSymbolTable); overload;
     procedure LeaveScope;
@@ -123,8 +142,11 @@ type
     function ParseSetElementList: TExpr;
     function ParseExprList: TExpr;
     function SimplifyQualId: TExpr;
+    // Analyze the full name of the type such as System.TObject
     function ParseTypeRef: TType;
+    // Analyze fully qualified IDs such as System.TObject, and store the results in FQID
     procedure ParseQualifiedId(const First: string = '');
+    // Analyze the fully qualified ID and find the actual TSymbol: TType or TConstant
     function ParseQualifiedSym(const First: string = ''): TSymbol;
     function ParseStatement(Parent: TStatement): TStatement;
     function ParseCompoundStmt: TCompoundStmt;
@@ -165,13 +187,22 @@ type
     function ParseObjectType(const ObjName: string): TObjectType;
     procedure ParseVarSection(Parent: TSymbol);
     procedure ParseConstSection(Parent: TSymbol);
+    // Analyze simple constant values (non-array, record)
+    // If there is a constant expression at the current position, and the analysis and evaluation are successful,
+    // It returns TRUE, and Value and ValTyp store constant values and actual types
+    // Otherwise, the value of Value is not changed, but ValTyp still stores the type of the actual expression
     function ParseConstSimpleValue(Typ: TType; var Value: TValueRec; out ValTyp: TType): boolean;
     procedure ParseConstArray(Typ: TArrayType; var V: TValueRec);
     procedure ParseConstRecord(Typ: TRecordType; var V: TValueRec);
     procedure ParseLabelSection(Parent: TSymbol);
     procedure ParseResStringSection(Parent: TSymbol);
+    // Check if Value exceeds the definition of typ, return True, indicating that Value has exceeded
+    // Return False, indicating that it is not exceeded or does not need to be checked
+    // Strict: Indicates whether to perform strict inspection. If you check enum or subrange,
+    // Strict inspection will check the minimum and maximum values of the type, on the contrary, only check the value that the size of the type can hold
     function IsConstantOutOfRange(typ: TType; const Value: TValueRec; Strict: boolean = False): boolean; overload;
     function IsConstantOutOfRange(typ: TType; Value: int64; Strict: boolean = False): boolean; overload;
+    // Check Expr, if Expr is invalid or the type is not bool, an error is issued
     function CheckBoolExpr(var Expr: TExpr): boolean;
     function IsSameArgs(L1, L2: TFuncParamList): boolean;
     procedure CheckForward;
@@ -181,23 +212,29 @@ type
     FErrorCount: integer;
     FMaxErrorCount: integer;
     FContext: TCompileContext;
-    FModule: TModule;
-    FTopFunction: TFunction;
-    FCurFunction: TFunction;
+    FModule: TModule; // current module
+    FTopFunction: TFunction; // The topmost function currently being analyzed
+    FCurFunction: TFunction; // The function currently being analyzed
+    // The superior symbol of the current position, such as the type segment being analyzed, FCurParent may be TMoudle, or TClassType
+    // If the analysis function, FCurParent is FModule,
+    // If the method is analyzed, FCurParent is the class/interface/object where the method is located
+    // If the type, var, const, FCurParent under the analysis function/method is the TFunction/TMethod
     FCurParent: TSymbol;
     FCurStates: TParseStates;
     FExpectedProcType: boolean;
-    FMinEnumSize: byte;
-    FAlignSize: byte;
-    FPointerSize: byte;
-    FRttiInfo: boolean;
-    FTypedAddress: boolean;
-    FWriteableConst: boolean;
+    // compile switch
+    FMinEnumSize: Byte; // 1, 2, 4
+    FAlignSize: Byte;   // 1, 2, 4, 8, 16
+    FPointerSize: Byte; // 4, 8
+    FRttiInfo: Boolean;     // $M+
+    FTypedAddress: Boolean; // $T+
+    FWriteableConst: Boolean; // $J+
     FCodeSwitches: TCodeSwitches;
     function GetSetType(typ: TSubrangeType): TSetType; overload;
     function GetSetType(typ: TEnumType): TSetType; overload;
     function GetSubrangeType(typ: TEnumType): TSubrangeType;
     function GetOpenArrayType(const typ: TType): TOpenArrayType;
+    // Take the overloaded list of the function
     procedure GetOverloadBegin(Func: TFunctionDecl);
     function GetOverloadNext: TFunctionDecl;
     procedure GetOverloadEnd;
@@ -214,11 +251,13 @@ type
     procedure ReleaseExpr(E: TExpr);
     function CreateStmt(Stmt: TStatementClass): TStatement;
     function FindSymbol(const S: string): TSymbol; overload;
+    {function FindSymbol(M: TModule; const S: string): TSymbol; overload;}
     function FindSymbol(Typ: TType; const S: string): TSymbol; overload;
     function FindWith(const S: string; out Sym: TSymbolExpr; out Elem: TSymbol): boolean;
+    // Determine whether Referred can be accessed from Ref
     function IsVisible(Ref, Referred: TSymbol): boolean;
   public
-    FIsSystemUnit: boolean;
+    FIsSystemUnit: boolean; // Whether to compile System unit
     procedure InternalError(const Msg: string);
     procedure ParseError(const Msg: string; Stop: boolean = False); overload;
     procedure ParseError(const Msg: string; Args: array of const; Stop: boolean = False); overload;
@@ -229,12 +268,17 @@ type
     procedure DoWarning(const Coord: TAstNodeCoord; const Msg: string); overload;
     procedure DoHint(const Coord: TAstNodeCoord; const Msg: string; Args: array of const); overload;
     procedure DoHint(const Coord: TAstNodeCoord; const Msg: string); overload;
+    // Check if R can be assigned to L
+    // AdjustRT indicates whether to change the Typ of R, AdjustRT=true, and replace the Typ of R when CanAssign returns True
     function CanAssign(LT: TType; R: TExpr; AdjustRT: boolean = True): boolean;
+    // Check whether T2 can be assigned to T1
     function CheckAssignCompatibility(T1, T2: TType): boolean; overload;
   public
     procedure FindProper(E: TUnaryExpr; ProcType: TProceduralType);
     function CheckExpr(var Expr: TExpr): boolean;
+    // Try to evaluate opNE..opSHR, opNot..opPos, opCast, opAddr, opCALL, opSET
     function TryEvalConst(E: TExpr; out Value: TValueRec): boolean;
+    // Try to get a value. E is opCONST, opNIL, opSymbol
     function TryEvalGet(E: TExpr; var Value: TValueRec): boolean;
     function ParseConstExpr: TExpr;
     function CheckConstExpr(var E: TExpr): boolean;
@@ -243,6 +287,7 @@ type
     procedure OpenCode(const S: string);
     procedure OpenFile(const FileName: string);
     function Parse: TModule;
+    //    procedure ParseModule(M: TModule);
     function ParseProgram: TModule;
     function ParseUnit: TModule;
     procedure ParseUnitInterface(M: TModule);
@@ -262,7 +307,7 @@ type
 function ParsePropDirective(const S: string): TPropDirective;
 begin
   Result := idNon;
-  if Length(S) < 4 then
+  if Length(S) < 4 then   // min 'read'
     Exit;
   case S[1] of
     'R', 'r': if SameText(S, 'read') then
@@ -325,6 +370,7 @@ end;
 
 function IsHint(const S: string; var H: TMemberHint): boolean;
 begin
+  // hDeprecated, hLibrary, hPlatform, hExperimental, hUnimplemented
   Result := True;
   if SameText(S, 'deprecated') then
     H := hDeprecated
@@ -348,15 +394,31 @@ begin
 end;
 
 procedure TParser.AddSymbols(M: TModule);
+{  procedure Add(List: TList);
+  var
+    I: Integer;
+  begin
+    for I := 0 to List.Count - 1 do
+      FExternSymbols.Add(TSymbol(List[I]));
+  end;}
 var
   I: integer;
 begin
+  // AutoAddToOwner temporarily handle it like this
   CurSymbols.AutoAddToOwner := False;
   AddSymbol(M);
   CurSymbols.AutoAddToOwner := True;
+  // The symbols in all uses units are added to a symbol table to increase the search speed
   FExternSymbols.EnsureCapacity(M.Symbols.Count);
   for I := 0 to M.Symbols.Count - 1 do
     FExternSymbols.Add(M.Symbols[I]);
+  {  Add(M.InterfaceSection.Types);
+  Add(M.InterfaceSection.ResStrings);
+  Add(M.InterfaceSection.Constants);
+  Add(M.InterfaceSection.Variables);
+  Add(M.InterfaceSection.Functions);
+  Add(M.InterfaceSection.BuiltinFuncs);
+  Add(M.InterfaceSection.ThreadVars);}
 end;
 
 function TParser.CanAssign(LT: TType; R: TExpr; AdjustRT: boolean): boolean;
@@ -369,6 +431,10 @@ begin
   end
   else if (LT.TypeCode = typClass) and (R.Typ.TypeCode = typClass) and R.IsCtorCall then
   begin
+    // Consider this situation, a class without a constructor uses the constructor of the base class:
+    // type tmyobj = class end;
+    // var obj: tmyobj;
+    // obj := tmyobj.create;
     Result := TClassType(LT).IsInheritedFrom(TClassType(R.Typ));
     if Result and AdjustRT then
       R.Typ := LT;
@@ -377,9 +443,12 @@ begin
   begin
     Result := LT.TypeCode in [typPointer, typProcedural, typClass, typClassRef, typPAnsiChar,
       typPWideChar, typDynamicArray, typInterface];
+    // ??Why don't changed
+    //if Result and AdjustRT then R.Typ := LT;
   end
   else if R.IsStringConstant then
   begin
+    // case: R is string constant, L is PAnsiChar,PWideChar,PackedString
     Result := LT.IsStringArithCompatible;
     if Result and AdjustRT and (LT.TypeCode <> typVariant) and (LT.TypeCode <> typArray) then
     begin
@@ -394,6 +463,8 @@ function TParser.CheckAssignCompatibility(T1, T2: TType): boolean;
 
   function InterfaceCompatible(T1, T2: TInterfaceType): boolean;
   begin
+    // IDispatch is compatible with disinterface
+    // Inherited from IDispatch is not compatible with disinterface
     if T1.IsDisp then
       Result := T1 = T2
     else
@@ -412,11 +483,35 @@ function TParser.CheckAssignCompatibility(T1, T2: TType): boolean;
 
   function CheckPointee(P1, P2: TPointerType): boolean;
   begin
+    // todo 1: There may still be problems, such as PInteger and PLongint
     Result := (P1.RefType = P2.RefType) or ((P1.RefType.TypeCode = typObject) and
       (P2.RefType.TypeCode = typObject) and TObjectType(P2.RefType).IsInheritedFrom(TObjectType(P1.RefType)));
   end;
 
 begin
+  {
+    T1 and T2 are of the same type, and it is not a file type or structured type that contains a file type at any level.
+    T1 and T2 are compatible ordinal types.
+    T1 and T2 are both real types.
+    T1 is a real type and T2 is an integer type.
+    T1 is PChar or any string type and the expression is a string constant.
+    T1 and T2 are both string types.
+    T1 is a string type and T2 is a Char or packed-string type.
+    T1 is a long string and T2 is PChar.
+    T1 and T2 are compatible packed-string types.
+    T1 and T2 are compatible set types.
+    T1 and T2 are compatible pointer types.
+    T1 and T2 are both class, class-reference, or interface types and T2 is a derived from T1.
+    T1 is an interface type and T2 is a class type that implements T1.
+    T1 is PChar or PWideChar and T2 is a zero-based character array of the form array[0..n] of Char.
+    T1 and T2 are compatible procedural types. (A function or procedure identifier is treated, in certain assignment statements, as an expression of a procedural type.
+    See procedural types in statements and expressionson page 5-29.)
+    T1 is Variant and T2 is an integer, real, string, character, Boolean, or interface type.
+    T1 is an integer, real, string, character, or Boolean type and T2 is Variant.
+    T1 is the IUnknown or IDispatch interface type and T2 is Variant. (The variant's type code must be varEmpty, varUnknown, or varDispatch if T1 is IUnknown, and varEmpty or varDispatch if T1 is IDispatch.)
+    }
+    //  if T1.TypeCode = typSubrange then T1 := TSubrangeType(T1).BaseType;
+    //  if T2.TypeCode = typSubrange then T2 := TSubrangeType(T2).BaseType;
   T1 := T1.NormalType;
   T2 := T2.NormalType;
   case T1.TypeCode of
@@ -453,7 +548,7 @@ begin
         typProcedural:
         begin
           Result := TProceduralType(T1).IsMethodPointer = TProceduralType(T2).IsMethodPointer;
-          if Result then
+          if Result {and FTypedAddress } then // In the $T+ state, need to check the parameter list
             Result := IsSameProcType(TProceduralType(T1), TProceduralType(T2));
         end;
         else
@@ -585,6 +680,9 @@ begin
   end;
 end;
 
+// todo 1: directly exposed function symbols, either expanded to call or
+// regarded as function pointers, should be prefixed with @
+
 function TParser.CheckExpr(var Expr: TExpr): boolean;
   procedure CheckConst(E: TConstExpr); forward;
 
@@ -594,6 +692,8 @@ function TParser.CheckExpr(var Expr: TExpr): boolean;
       [TypeNames[t1], TypeNames[t2]]);
   end;
 
+  // Make sure Expr does not point to the Node specified by Kind
+  // Return true to indicate that Expr is not in the Node type specified by Kinds
   function NotAllowNode(Kinds: TAstNodeKinds; Expr: TExpr): boolean;
   var
     Invalid: boolean;
@@ -605,6 +705,21 @@ function TParser.CheckExpr(var Expr: TExpr): boolean;
     begin
       Invalid := Sym.NodeKind in Kinds;
     end;
+
+    {Invalid := False;
+    case Expr.OpCode of
+      opSYMBOL:
+        if TSymbolExpr(Expr).Reference <> nil then
+          Invalid := TSymbolExpr(Expr).Reference.NodeKind in Kinds;
+      opMEMBER:
+        begin
+          Assert(TBinaryExpr(Expr).Right.OpCode = opSYMBOL, 'NotAllowNode');
+          Expr := TBinaryExpr(Expr).Right;
+          if TSymbolExpr(Expr).Reference <> nil then
+            Invalid := TSymbolExpr(Expr).Reference.NodeKind in Kinds;
+        end;
+    end;}
+
     if Invalid then
     begin
       if Expr.Typ = nil then
@@ -641,6 +756,7 @@ function TParser.CheckExpr(var Expr: TExpr): boolean;
       opkUnary: Kind := 3;
       opkList: Kind := 4;
     end;
+    //    Old.Detach;
     case Kind of
       1: TBinaryExpr(P).Left := New;
       2: TBinaryExpr(P).Right := New;
@@ -653,6 +769,8 @@ function TParser.CheckExpr(var Expr: TExpr): boolean;
     end;
   end;
 
+  // Try constant evaluation, if successful, replace the original expression with the new TConstExpr
+  // If it fails, return to the original expression
   function ConstantFold(E: TExpr): TExpr;
   var
     C: TConstExpr;
@@ -688,12 +806,15 @@ function TParser.CheckExpr(var Expr: TExpr): boolean;
   begin
     List := TListExpr(Expr.Operand);
     Assert(List <> nil, 'CheckOpenArrayConstructor');
+    // Because function overloading may be involved, here is only a basic check.
+    // The specific check will be delayed until CheckArrayOfConst CheckArrayOfType
     for I := 0 to List.Count - 1 do
     begin
       E := List.Items[I];
       Ref := E.GetReference;
       if (Ref.NodeKind = nkType) and (TType(Ref).TypeCode <> typClass) then
         ParseError(E.Coord, SErr_InvalidOperand);
+      //  NotAllowNode([nkType], E);
       if not (E.Typ.TypeCode in [typInt, typNumeric, typString, typChar, typBool, typPAnsiChar,
         typPWideChar, typVariant, typProcedural, typRecord, typClassRef, typSubrange, typArray, typDynamicArray]) then
       begin
@@ -713,6 +834,7 @@ function TParser.CheckExpr(var Expr: TExpr): boolean;
       Result := E.Parent.OpCode in SetOps;
   end;
 
+  // Check opSET and determine the type. Return true to indicate that it can be regarded as Set
   function CheckSetType(Expr: TUnaryExpr): boolean;
   var
     List: TListExpr;
@@ -721,7 +843,7 @@ function TParser.CheckExpr(var Expr: TExpr): boolean;
     T, T2: TType;
     AllConst: boolean;
   begin
-    List := TListExpr(Expr.Operand);
+    List := TListExpr(Expr.Operand); // opLIST
     Assert(List <> nil, 'CheckSetType');
     AllConst := True;
     if List.Count > 0 then
@@ -732,7 +854,7 @@ function TParser.CheckExpr(var Expr: TExpr): boolean;
         AllConst := eaConst in E.Attr;
       case T.TypeCode of
         typBool: Expr.Typ := FContext.FBoolSetType;
-        typChar: Expr.Typ := FContext.FCharSetType;
+        typChar: Expr.Typ := FContext.FCharSetType; // First assume that WideChar is legal
         typEnum: Expr.Typ := GetSetType(TEnumType(T));
         else
           if T.IsInteger then
@@ -750,6 +872,7 @@ function TParser.CheckExpr(var Expr: TExpr): boolean;
         if AllConst then
           AllConst := eaConst in E.Attr;
         T2 := E.Typ;
+        // todo 1: Need to check whether the left and right values exceed 0..255
         if T2.TypeCode = typSubrange then
           T2 := TSubrangeType(T2).BaseType;
         if not ((T = T2) or (T.IsInteger and T2.IsInteger)) then
@@ -768,7 +891,10 @@ function TParser.CheckExpr(var Expr: TExpr): boolean;
 
   procedure CheckSetOp(Expr: TUnaryExpr);
   begin
+    // There are two situations where set constructor is needed:
+    // open array, set
     NotAllowNode([nkType], Expr.Operand);
+    // Because function overloading may be involved, here is only a basic check.
     if not CheckSetType(Expr) then
     begin
       if NeedSetType(Expr) then
@@ -778,7 +904,7 @@ function TParser.CheckExpr(var Expr: TExpr): boolean;
         if Expr.Operand <> nil then
           Expr.Operand.Typ := Expr.Typ;
       end
-      else
+      else // Check as an open array
         CheckOpenArrayConstructor(Expr);
     end;
   end;
@@ -790,6 +916,7 @@ function TParser.CheckExpr(var Expr: TExpr): boolean;
     L, R: TType;
     Result: boolean;
   begin
+    {integer, real, string, packed string, sets, typed pointer, variant, olevariant}
     NotAllowNode([nkType], bin.Left);
     NotAllowNode([nkType], bin.Right);
     bin.Typ := FContext.FBooleanType;
@@ -846,6 +973,13 @@ function TParser.CheckExpr(var Expr: TExpr): boolean;
         end
         else
           Result := False;
+      {  Result := (L.TypeCode = R.TypeCode) or R.IsStringCompatible
+            or (R.TypeCode in [typPointer,
+                  typChar,
+                //  typPAnsiChar, typPWideChar,
+                  typVariant]);}
+
+      // AnsiChar can not compare to WideChar
       typChar:
       begin
         Result := ((R.TypeCode = typChar) and (TCharType(R).Kind = TCharType(L).Kind)) or
@@ -859,10 +993,12 @@ function TParser.CheckExpr(var Expr: TExpr): boolean;
       typPointer: case R.TypeCode of
           typInterface, typProcedural: Result := bin.Left.OpCode = opNIL;
           else
+          // todo 1: If two pointers point to different objects or records, they should not pass
             Result := R.TypeCode in [typPointer, typPAnsiChar, typPWideChar, typClass, typClassRef];
         end;
       typProcedural: if bin.OpCode in [opNE, opEQ] then
         begin
+          // an examination
           case
             R.TypeCode of
             typProcedural: Result := TProceduralType(L).IsMethodPointer = TProceduralType(R).IsMethodPointer;
@@ -898,7 +1034,11 @@ function TParser.CheckExpr(var Expr: TExpr): boolean;
         end
         else
           Result := False;
-      typInterface: if bin.OpCode in [opNE, opEQ] then
+      typInterface:
+      // dispinterface can be the same as IDispatch and the same type of dispinterface
+      // interface of the same inheritance tree can be compared
+      // They can all be compared with nil
+      if bin.OpCode in [opNE, opEQ] then
         begin
           case R.TypeCode of
             typPointer: Result := bin.Right.OpCode = opNIL;
@@ -963,8 +1103,9 @@ function TParser.CheckExpr(var Expr: TExpr): boolean;
   var
     hasErr, notEmpty: boolean;
   begin
-    bin.
-      Typ := FContext.FBooleanType;
+    // Left: integer, char, enum
+    // right: set
+    bin.Typ := FContext.FBooleanType;
     NotAllowNode([nkType], bin.Left);
     NotAllowNode([nkType],
       bin.Right);
@@ -992,6 +1133,8 @@ function TParser.CheckExpr(var Expr: TExpr): boolean;
   procedure CheckAsOp(bin: TBinaryExpr);
   begin
     NotAllowNode([nkType], bin.Left);
+    // On the left is an expression of class, interface type
+    // On the right is the class reference expression, interface type symbol
     if bin.Left.Typ.TypeCode in [typClass, typInterface] then
     begin
       case bin.Right.Typ.TypeCode of
@@ -1020,6 +1163,8 @@ const
 
   function NeedExpand(t1, t2: TIntType): boolean;
   begin
+    // LongWord and other signed number operations need to be extended to Int64,
+    // which will cause some performance loss
     Result := ((t1.Kind = intU32) and (t2.Kind in [intS8, intS16, intS32])) or
       ((t2.Kind = intU32) and (t1.Kind in [intS8, intS16, intS32]));
   end;
@@ -1120,7 +1265,7 @@ const
         end;
       typVariant:
       begin
-        un.Typ := T;
+        un.Typ := T; // FContext.FVariantType;
         Include(un.Attr, eaVarOp);
       end;
       else
@@ -1131,15 +1276,20 @@ const
       Include(un.Attr, eaConst);
   end;
 
+  // opADD opSUB opMUL
   procedure CheckAddSubMulOp(bin: TBinaryExpr);
   var
     t1, t2: TTypeCode;
     L, R: TType;
   begin
+    {
+      integer, real, string, packed string, sets, typed pointer, variant, olevariant
+    }
     NotAllowNode([nkType], bin.Left);
     NotAllowNode([nkType], bin.Right);
     L := bin.Left.Typ.NormalType;
     R := bin.Right.Typ.NormalType;
+    // todo 1: The constant must be changed to avoid expansion to 64-bit operations
     t1 := L.TypeCode;
     t2 := R.TypeCode;
     if (t1 in [typInt, typNumeric]) and (t2 in [typInt, typNumeric]) then
@@ -1147,25 +1297,27 @@ const
       if (t1 = typInt) and (t2 = typInt) then
       begin
         if (TIntType(L).Kind <= intS32) and (TIntType(R).Kind <= intS32) then
-        begin
+        begin   // byte and word can be transformed into longint, so the result of the operation is regarded as longint
           bin.Typ := FContext.FLongintType;
         end
         else if (TIntType(L).Kind = intU64) or (TIntType(R).Kind = intU64) then
-        begin
+        begin   // The result of the operation with Uint64 is UInt64
           bin.Typ := FContext.FUInt64Type;
         end
         else if (TIntType(L).Kind in [intS8, intS16, intS32, intS64]) or (TIntType(R).Kind in
           [intS8, intS16, intS32, intS64]) then
-        begin
+        begin   // shortint, smallint, longint, int64 and LongWord operations, the result is int64
           bin.Typ := FContext.FInt64Type;
         end
-        else
+        else   // byte, word, longword and longword operations, the result is longword, no need to be converted to int64
           bin.Typ := FContext.FLongWordType;
+        // Check whether the operation needs to be extended to 64 bits
         if NeedExpand(TIntType(L), TIntType(R)) then
           DoWarning(bin.Coord, SWarn_CombiningSignedUnsigned);
       end
       else
       begin
+        // Operate with Currency, the result is Currency, otherwise it is Double
         if ((t1 = typNumeric) and (TNumericType(L).Kind = numCurrency)) or
           ((t2 = typNumeric) and (TNumericType(R).Kind = numCurrency)) then
           bin.Typ := FContext.FCurrencyType
@@ -1181,12 +1333,18 @@ const
       Include(
         bin.Attr, eaVarOp);
     end
+    // string
     else if (bin.OpCode = opADD) and L.IsStringArithCompatible and R.IsStringArithCompatible then
     begin
       if L.IsUnicodeString or R.IsUnicodeString then
         bin.Typ := FContext.FUnicodeStringType
       else if L.IsWideString or R.IsWideString then
         bin.Typ := FContext.FWideStringType
+      // todo 8: do it later
+       {ShortString addition, you need to check the total length, if it exceeds 255, it will be converted to string addition, this function
+        Save it to be implemented later, now regardless of the length, it is converted to string
+       else if (t1 = typShortString) or (t2 = typShortString) then
+         bin.Typ := FContext.FTypes[typShortString]}
       else
         bin.Typ := FContext.FStringType;
       Include(bin.Attr, eaStrOp);
@@ -1196,6 +1354,9 @@ const
     begin
       bin.Typ := FContext.FNativeIntType;
     end
+    // pointer arithmetic
+     // p := 1 + p: ok
+     // p := 1-p: error
     else if (bin.OpCode in [opADD, opSUB]) and (t1 in [typPointer, typPAnsiChar, typPWideChar]) and (t2 = typInt) then
     begin
       if (t1 = typPointer) and TPointerType(L).IsUntype then
@@ -1209,11 +1370,14 @@ const
       bin.
         Typ := R;
     end
+    // Set operations
     else if (t1 = typSet) and (t2 = typSet) then
     begin
       if (TSetType(L).RangeType <> nil) and (TSetType(R).RangeType <> nil) and not
         TSetType(L).RangeType.Equals(TSetType(R).RangeType) then
+        //        IncompatibleErr(bin.Coord, t1, t2);
         ParseError(bin.Coord, 'Incompatible types');
+      //bin.Typ := GetSetOpType(L, R);
       bin.Typ := L;
       Include(bin.Attr, eaSetOp);
     end
@@ -1231,6 +1395,10 @@ const
   var
     L, R: TType;
   begin
+    {
+       shl: If the left operand is less than Integer, the result is of type Integer. Otherwise, the result is the type of left operand
+       shr result type is inferred to be the type of left operand
+    }
     NotAllowNode([nkType], bin.Left);
     NotAllowNode([nkType], bin.Right);
     L := bin.Left.Typ.NormalType;
@@ -1263,10 +1431,22 @@ const
     t1, t2: TTypeCode;
     L, R: TType;
   begin
+    {
+      variant, olevariant, integer, boolean
+    }
     NotAllowNode([nkType], bin.Left);
     NotAllowNode([nkType], bin.Right);
     L := bin.Left.Typ.NormalType;
     R := bin.Right.Typ.NormalType;
+    {
+       Sign speculation of and or xor result:
+         unsigned op unsigned: unsigned
+         unsigned op signed: \
+                              |=> unsigned
+         signed op unsigned: /
+         signed op signed: signed
+         0..$7fffffff constant can change the type. Otherwise, no.
+    }
     t1 := L.TypeCode;
     t2 := R.TypeCode;
     if (t1 = typInt) and (t2 = typInt) then
@@ -1327,12 +1507,16 @@ const
 
   function CreateCallExpr(E: TExpr): TBinaryExpr;
   begin
+    { Left := Sym.Parent;
+      if (Left = nil) or (Left.OpCode <> opMEMBER) then Left := Sym;
+    }
     Result := CreateBinaryExpr(opCALL, nil, CreateListExpr);
     Result.Attr := E.Attr;
     Result.Coord := E.Coord;
     Result.Switches := E.Switches;
-    SubstituteExpr(E,
-      Result);
+    // Result.Next := Left.Next;
+    // Left.Next := nil;
+    SubstituteExpr(E, Result);
     Result.Left := E;
   end;
 
@@ -1340,6 +1524,7 @@ const
   var
     AddrExpr: TUnaryExpr;
   begin
+    //    Assert(E.Typ.TypeCode = typProcedural, 'CreateProcAddrExpr: Require E is procedural type');
     AddrExpr := Self.CreateUnaryExpr(opADDR, nil);
     AddrExpr.Typ := E.Typ;
     AddrExpr.Coord := E.Coord;
@@ -1416,8 +1601,12 @@ type
   TCheckArgsResult = (caMismatched, caOk, caCompatible);
   TCheckOverloadResult = (coNonMatched, coMatched, coMultiMatched, coCompatible, coMultiCompatible);
 
+  // Only when IsOverload=True is it possible to return caOk
   function CheckArgs(FormalArgs: TFuncParamList; CallExpr: TBinaryExpr; ErrReport: boolean = True;
-    IsOverload: boolean = False; DoChange: boolean = True; IsVarArgs: boolean = False): TCheckArgsResult; overload;
+    IsOverload: boolean = False; // Located in Overload
+    DoChange: boolean = True; // If the actual parameter is the symbol of Overload, you can adjust the TFunctionDecl it points to
+    IsVarArgs: boolean = False // Is there a varargs declaration
+    ): TCheckArgsResult; overload;
 
     procedure ShowError(const Coord: TAstNodeCoord; const Msg: string);
     begin
@@ -1427,6 +1616,7 @@ type
 
     procedure ChangeType(ActualArg: TExpr; ArgTyp: TType);
     begin
+      // change type
       if DoChange and (ActualArg.Typ.TypeCode = typSet) then
       begin
         ActualArg.
@@ -1436,6 +1626,7 @@ type
       end;
     end;
 
+    // Check if typ is open array compatible
     function IsOpenArrayCompatibility(typ, el: TType): boolean;
     begin
       case typ.TypeCode of
@@ -1448,6 +1639,7 @@ type
       end;
     end;
 
+    // check variant open array
     procedure CheckArrayOfConst(ActualArg: TExpr);
     begin
       if not IsOpenArrayCompatibility(ActualArg.Typ, FContext.FVarRecType) then
@@ -1470,6 +1662,7 @@ type
           if not CheckAssignCompatibility(E.Typ, TOpenArrayType(ArgDef.ParamType).ElementType) then
             ShowError(E.Coord, SErr_IncompatibleTypes);
         end;
+        // change type
         ChangeType(ActualArg, ArgDef.ParamType);
       end
       else
@@ -1490,6 +1683,8 @@ type
           Inc(Result);
     end;
 
+    // Check the type compatibility of actual and formal parameters
+    // T1 formal parameter type, T2 actual parameter type, E, actual parameter expression
     function CheckTypeCompatibility(T1, T2: TType; E: TExpr): boolean;
     var
       Temp: TType;
@@ -1506,6 +1701,7 @@ type
         Result := Self.CanAssign(T1, E);
         if not (Result and (E.Typ <> Temp)) then
           E.Typ := Temp;
+        //Result := CheckAssignCompatibility(T1, T2)
       end
       else
         Result := False;
@@ -1515,6 +1711,7 @@ type
     begin
       if (T1 <> nil) and (T2 <> nil) then
       begin
+        // This allows function pointers to be passed to untyped pointers
         if ((T2.TypeCode = typProcedural) and not TProceduralType(T2).IsMethodPointer) and T1.IsUntypePointer then
           Result :=
             True
@@ -1525,6 +1722,7 @@ type
         Result := False;
     end;
 
+    // Check if the actual parameters are compatible
     function CheckExprCompatibility(Param: TFuncParam; E: TExpr): TCheckArgsResult;
     var
       Typ: TProceduralType;
@@ -1561,6 +1759,7 @@ type
         Result := caMismatched;
     end;
 
+    // Check if the types of the actual parameters are compatible. Ref is the symbol pointed to by E
     function CheckSingleCompatibility(Param: TFuncParam; E: TExpr; Ref: TSymbol): TCheckArgsResult;
     var
       AlterTyp: TType;
@@ -1587,6 +1786,7 @@ type
           Ok := False;
         if not Ok and (MinOfProcParams(Ref) = 0) then
         begin
+          //AlterTyp := Ref.ReturnType;
           AlterTyp := GetReturnType(Ref);
           if AlterTyp <> nil then
           begin
@@ -1689,9 +1889,12 @@ type
           opADDR: if TUnaryExpr(E).Operand <> nil then
               Ref := TUnaryExpr(E).Operand.GetReference;
           else
+            // Other expressions that return function pointers (added in CheckAdjustCall) such as aaa(TMyFunc(p));
+            //Result := caMismatched;
             Result := CheckExprCompatibility(Arg, E);
             Exit;
         end;
+        // Ref is not necessarily a function, it may be a variable of a function pointer
         if Ref <> nil then
         begin
           if (Ref.NodeKind in [nkFunc, nkMethod, nkExternalFunc]) and TFunctionDecl(Ref).IsOverload then
@@ -1748,6 +1951,7 @@ type
           Arg := FormalArgs[I];
           if Arg.ArgKind in [akArrayOfType, akArrayOfConst] then
           begin
+            // Check open array parameters
             if TOpenArrayType(Arg.ParamType).ElementType.TypeCode = typUntype then
               CheckArrayOfConst(E)
             else
@@ -1766,6 +1970,7 @@ type
             if not E.HasMemory then
               ShowError(E.Coord, SErr_IncompatibleTypes)
             else if (Arg.ParamType.TypeCode <> typUntype) and not E.Typ.Equals(Arg.ParamType) then
+            // var/out parameters must be strictly equal
             begin
               ShowError(E.Coord, SErr_VarArgMustIdentical);
               Exit;
@@ -1798,6 +2003,7 @@ type
       Result := caCompatible;
   end;
 
+  // Check a set of overloaded functions
   function CheckFuncs(var Func: TFunctionDecl; CallExpr: TBinaryExpr): TCheckOverloadResult;
   var
     ChkResult: TCheckArgsResult;
@@ -1874,6 +2080,7 @@ type
         Exclude(E.Attr, eaDelayed);
         if E.GetFunctionSymbol <> nil then
         begin
+          // So far it should be a function pointer, add a @
           Assert(E.OpCode <> opADDR);
           CreateProcAddrExpr(E);
         end;
@@ -1888,6 +2095,7 @@ type
   begin
     if fmOverload in Func.Modifiers then
     begin
+      // There is an overflow command, you can search across a range
       GetOverloadBegin(Func);
       Old := Func;
       FirstOk :=
@@ -1951,6 +2159,28 @@ type
     end;
   end;
 
+  {// Find a function with no parameters and return value
+  procedure FindOverloadNoArgs(var Func: TFunctionDecl);
+  begin
+    if fmOverload in Func.Modifiers then
+    begin
+      Parser.GetOverloadBegin(Func);
+    end
+    else if Func.NextOverload <> nil then
+    begin
+      Old := Func;
+      ChkResult := CheckFuncs(Func, CallExpr);
+      case ChkResult of
+        coCompatible, coMatched: Exit;
+        coMultiCompatible, coMultiMatched:
+          Parser.ParseError(Old.Coord, 'Ambiguous overloaded call to %s', [Old.Name]);
+      end;
+      Func := Old;
+      Parser.ParseError(CallExpr.Coord,
+        'There is no overloaded version of %s that can be called with these arguments',
+        [Old.Name]);
+    end;
+  end;    }
   function CheckBuiltinArgs(Kind: TBuiltinFunctionKind; CallExpr: TBinaryExpr; var Typ: TType): TExpr;
   var
     Num: integer;
@@ -1974,6 +2204,7 @@ type
     begin
       if Num = 3 then
       begin
+        // copy string or array
         NotAllowNode([nkType], A1);
         NotAllowNode([nkType], A2);
         NotAllowNode([nkType], A3);
@@ -1991,6 +2222,7 @@ type
 
     procedure CheckAddr;
     begin
+      // The address taken by Addr is untyped, regardless of the state of $T
       if Num = 1 then
       begin
         if not (A1.HasMemory or A1.IsFunction) then
@@ -2003,6 +2235,7 @@ type
 
     procedure CheckAssigned;
     begin
+      // Assigned parameter requirements are pointers
       if Num = 1 then
       begin
         NotAllowNode([nkType, nkFunc, nkMethod, nkExternalFunc], A1);
@@ -2014,6 +2247,7 @@ type
       Typ := FContext.FBooleanType;
     end;
 
+    // Break/Continue
     procedure CheckBrCont;
     begin
       if [psInWhileStmt, psInRepeatStmt, psInForEachStmt, psInForStmt] * FCurStates = [] then
@@ -2038,6 +2272,8 @@ type
 
     procedure CheckDispose;
     begin
+      // todo 1: Need to add this form of Dispose(obj, Init)
+      // must be a pointer
       if Num = 1 then
       begin
         NotAllowNode([nkType], A1);
@@ -2060,6 +2296,8 @@ type
         T := A2.Typ;
         if T.TypeCode = typSubrange then
           T := TSubrangeType(T).BaseType;
+        //        if not ((A2.Typ.TypeCode = typSubrange) and
+        //                (TSubrangeType(A2).BaseType = TSetType(A1.Typ).RangeType.BaseType)) then
         if T <> TSetType(A1.Typ).RangeType.BaseType then
           ParseError(A2.Coord, SErr_IncompatibleTypes);
       end
@@ -2105,6 +2343,8 @@ type
       if Num in [1, 2] then
       begin
         NotAllowNode([nkType], A1);
+        {if not A1.HasMemory then
+          Parser.ParseError(A1.Coord, SErr_VarRequired);}
         if not A1.Typ.IsPointer then
           ParseError(A1.Coord, SErr_IncompatibleTypes);
         if (Num = 2) and not A2.Typ.IsInteger then
@@ -2166,6 +2406,7 @@ type
 
     procedure CheckHigh;
     begin
+      // high parameter can be type name such as Shortin
       if Num = 1 then
       begin
         if not ((A1.Typ.TypeCode in [typArray, typDynamicArray, typString]) or A1.Typ.IsOrdinal) then
@@ -2194,12 +2435,17 @@ type
 
     procedure CheckNew;
     begin
+      // todo 1: Need to add the form New(obj, Init)
+      // New requires pointer type parameters
       if Num = 1 then
       begin
         if not A1.HasMemory then
           ParseError(A1.Coord, SErr_VarRequired);
         if not A1.Typ.IsPointer then
           ParseError(A1.Coord, SErr_IncompatibleTypes);
+//        NotAllowNode([nkType]);
+//        if not (A1.HasMemory and (Typ.TypeCode = typPointer)) then
+//          ParseError(A1.Coord, SErr_IncompatibleTypes);
       end
       else
         ParseError(CallExpr.Coord, SErr_ArgNotMatched);
@@ -2243,6 +2489,7 @@ type
 
     procedure CheckOrd;
     begin
+      // ord parameter can be enum, int
       if Num = 1 then
       begin
         NotAllowNode([nkType], A1);
@@ -2297,8 +2544,10 @@ type
     begin
       if Num > 1 then
       begin
+        // A1 must be a variable
         if not ((A1.HasMemory) and (A1.Typ.TypeCode in [typString, typDynamicArray])) then
           ParseError(A1.Coord, SErr_IncompatibleTypes);
+        // If it is a DynamicArray, the dimension must be checked
       end
       else
         ParseError(CallExpr.Coord, SErr_ArgNotMatched);
@@ -2307,6 +2556,12 @@ type
 
     procedure CheckSizeOf;
     begin
+      // The SizeOf parameter can be any expression, and only calculate the size based on the type
+    (* if Num = 1 then begin
+       {if not (A1.NodeKind in [nkVariable, nkConstant, nkType, nkEnumElement, nkFunc, nkExpr]) then
+           ParseError(A1.Coord, SErr_IncompatibleTypes);}
+       end else
+         ParseError(CallExpr.Coord, SErr_ArgNotMatched);*)
       if Num <> 1 then
         ParseError(CallExpr.Coord, SErr_ArgNotMatched);
       Typ := FContext.FIntegerType;
@@ -2337,6 +2592,11 @@ type
       Typ := FContext.FPointerType;
     end;
 
+{    function createConst(Value: Integer): TConstExpr;
+    begin
+      Result := CreateConstExpr(opCONST);
+      Result.Value := ValFromInt(Value);
+    end;}
   begin
     ActualArgs := TListExpr(CallExpr.Right);
     Assert(ActualArgs.OpCode = opLIST);
@@ -2350,8 +2610,7 @@ type
       A2 := ActualArgs.Items[1];
     if Num > 2 then
       A3 := ActualArgs.Items[2];
-    case
-      Kind of
+    case Kind of
       bfAbs: CheckAbs;
       bfAddr: CheckAddr;
       bfAssigned: CheckAssigned;
@@ -2371,8 +2630,7 @@ type
       bfNew: CheckNew;
       bfOdd: CheckOdd;
       bfOrd: CheckOrd;
-      bfPred, bfSucc:
-        CheckPred;
+      bfPred, bfSucc: CheckPred;
       bfPtr: CheckPtr;
       bfRound, bfTrunc: CheckRound;
       bfSetLength: CheckSetLength;
@@ -2385,6 +2643,8 @@ type
     if (Typ = FContext.FAnytype) and (CallExpr.Parent = nil) then
       Typ := FContext.FUntype;
     Result := CallExpr;
+    // todo 999: If you add built-in functions, you need to check here
+    // todo 1: Addr needs to be included
     if Kind in [bfAbs, bfChr, bfHi, bfHigh, bfLo, bfLow, bfOdd, bfOrd, bfPred, bfRound, bfSucc, bfSwap, bfTrunc] then
     begin
       if (A1 <> nil) and ((eaConst in A1.Attr) or A1.IsTypeSymbol) then
@@ -2405,6 +2665,13 @@ type
       typProcedural, typClass, typClassRef, typInterface]);
   end;
 
+  {function VarCastOk(t1, t2: TType): Boolean;
+   begin
+     // Check if it can be varcast
+     // int=>ptr,ptr=>int only the same size, but not regarded as VarCast
+     // self=>ptr because Self is only a value
+   end;}
+
   function CheckValueCast(L, R: TType): boolean;
   begin
     if L.TypeCode = typVariant then
@@ -2412,8 +2679,8 @@ type
     else if R.TypeCode = typVariant then
       Result :=
         L.IsOrdinal or L.IsReal or (L.TypeCode in [typInterface])
-    else if L.IsReal then
-      Result := R.IsReal
+    else if L.IsReal then // Int<=Real,Real<=Int, not allowed
+      Result := {R.IsOrdinal or} R.IsReal
     else
       Result := ValueCastOk(L) and ValueCastOk(R);
   end;
@@ -2439,6 +2706,21 @@ type
     NotAllowNode([nkType], bin.Right);
     R := E.Typ.NormalType;
     HasMem := E.HasMemory;
+    // see http://docwiki.embarcadero.com/RADStudio/en/Expressions_(Delphi)#Typecasts
+
+     // todo 5: cast needs further study
+     // todo 5: variable is also valid for properties and function return values TRec(obj.Prop)
+     {
+     ordinal type => ordinal type, pointer, variant, (set, array or record with memory of equal size)
+     pointer type => ordinal type, pointer, string, class, classref, interface
+     variant => ordinal, real, interface
+      (set, array or record) => ordinal type, pointer with memory of equal size
+     }
+     {
+       variable cast: The essence is to transform a piece of memory, which must be untyped or equal in size to the target type
+                       And exclude Int<=>Real
+       value cast: If it cannot be regarded as a variable cast, then it is a value cast
+     }
     if HasMem and not (psInConstExpr in Self.FCurStates) then
     begin
       Ok := not (L.IsInteger and R.IsReal) and not (L.IsReal and R.IsInteger);
@@ -2447,13 +2729,19 @@ type
         Ok := (L.Size = R.Size) or (R.TypeCode = typUntype);
         if not Ok then
           Ok := CheckValueCast(L, R)
-        else
+        else  // 2016.3.26 For Int<=>Ptr of the same size, it is also regarded as a varcast
           Include(bin.Attr, eaVarCast);
+        { else if not (L.IsInteger and R.IsPointerBased) and
+              not (R.IsInteger and L.IsPointerBased) then // Ptr => Int or Int=>Ptr is not regarded as varcast
+          Include(bin.Attr, eaVarCast);}
       end;
     end
     else
     begin
       Ok := CheckValueCast(L, R);
+      {Ok := not (psInLeftVal in FCurStates);
+      if Ok then
+        Ok := CheckValueCast(L, R);}
     end;
     if Ok then
     begin
@@ -2461,12 +2749,14 @@ type
       begin
         Include(bin.Attr, eaConst);
         Result := ConstantFold(bin);
+        //        bin := nil;
       end;
     end;
     if not Ok then
       ParseError(Result.Coord, SErr_InvalidCast)
     else
     begin
+      // If the final result is a function, you should check whether a function call is made
       if Result.Typ.TypeCode = typProcedural then
         Result := CheckAdjustCall(Result);
     end;
@@ -2478,10 +2768,19 @@ type
     Typ: TType;
     Ref: ^TSymbol;
   begin
+    {
+     There are two situations for the left node of Call:
+     1. Symbols
+     2. Expressions that return function pointers
+    }
     Result := bin;
     L := bin.Left;
     if L.OpCode = opMEMBER then
     begin
+      {while TBinaryExpr(L).Right.OpCode = opMEMBER do
+      begin
+        L := TBinaryExpr(L).Right;
+      end;}
       ASSERT(TBinaryExpr(L).Right.OpCode = opSYMBOL, 'CheckCall');
       Ref := @TSymbolExpr(TBinaryExpr(L).Right).reference;
     end
@@ -2489,13 +2788,14 @@ type
       Ref := @TSymbolExpr(L).reference
     else
       Ref := nil;
+    //    if (Ref = nil) then Exit;
     if (Ref <> nil) and (Ref^ <> nil) and (Ref^.NodeKind in [nkType, nkFunc, nkMethod,
       nkExternalFunc, nkBuiltinFunc]) then
     begin
       case Ref^.NodeKind of
         nkType:
         begin
-          bin.OpCode := opCAST;
+          bin.OpCode := opCAST; // check type cast?
           Result := CheckCast(bin);
         end;
         nkFunc, nkMethod, nkExternalFunc:
@@ -2521,7 +2821,7 @@ type
       end;
     end
     else if (L.Typ.IsProcedural) then
-    begin
+    begin // variable of procedural?
       NotAllowNode([nkType], L);
       CheckArgs(TProceduralType(L.Typ).Params, bin);
       bin.Typ := TProceduralType(L.Typ).ReturnType;
@@ -2538,14 +2838,29 @@ type
       ParseError(bin.Coord, SErr_InvalidOperand);
   end;
 
+  // Check if there is an @ operation before the expression
   function AddrOpPrefix(E: TExpr): boolean;
   begin
     Result := (E.Parent <> nil) and (E.Parent.OpCode = opADDR);
+    {
+     // todo 1: This is not appropriate. For example @obj[proc1].show, judge proc1 to be invalid
+     Result := True;
+     E := E.Parent;
+     while E <> nil do
+     begin
+       if E.OpCode = opADDR then Exit;
+       E := E.Parent;
+     end;
+     Result := False;}
   end;
 
 type
   TCallNeedCheckResult = (cncrNeed, cncrDelayed, cncrIsCall, cncrIsAddr, cncrOther);
 
+  // Check whether the expression E needs to be expanded to call, and return cncrNeed as needed
+  // E is TSymbolExpr or opMember or TExpr of type TProceduralType
+  // Ref is the symbol pointed to by E, which can be nil
+  // FunT is the type of E, which can be nil
   function CallNeedCheck(E: TExpr; Ref: TSymbol; FunT: TProceduralType): TCallNeedCheckResult;
   var
     T: TType;
@@ -2559,6 +2874,10 @@ type
     end;
     if synProcvarFpc in FSyntaxOptions then
     begin
+      // The fpc style syntax does not need to be dynamically judged based on the location of the symbol.
+      // Function: call.
+      // Function variable: variable.
+      // Take function pointer: add @
       isFun := (Ref <> nil) and (Ref.NodeKind in [nkFunc, nkMethod, nkExternalFunc]);
       if isFun then
       begin
@@ -2567,6 +2886,7 @@ type
           case E.Parent.OpCode of
             opADDR: Result := cncrIsAddr;
             opCALL, opINHERITED: Result := cncrIsCall;
+            // todo 1: opINHERITED?
             else
               Result := cncrNeed;
           end;
@@ -2583,9 +2903,9 @@ type
       if psInLeftVal in FCurStates then
       begin
         if (Ref <> nil) and (Ref.NodeKind in [nkFunc, nkMethod, nkExternalFunc]) then
-          Result := cncrNeed
+          Result := cncrNeed  // function cannot be assigned
         else
-          Result := cncrOther;
+          Result := cncrOther;  // At this time, it is impossible to decide whether it is a function call. Wait for further analysis
       end
       else if FExpectedProcType then
         Result := cncrOther
@@ -2593,9 +2913,9 @@ type
         Result := cncrNeed;
     end
     else if E.Parent.OpCode in [opCALL, opINHERITED] then
-      Result := cncrIsCall
+      Result := cncrIsCall   // Already Call
     else if AddrOpPrefix(E) then
-      Result := cncrIsAddr
+      Result := cncrIsAddr   // take address
     else
     begin
       if (Ref <> nil) and (Ref.NodeKind in [nkFunc, nkMethod, nkExternalFunc]) then
@@ -2604,6 +2924,7 @@ type
         T := FunT.ReturnType
       else
         T := nil;
+      // 1. There is a return value 2. The parent is the parameter list
       if (T <> nil) and (eaArgList in E.Parent.Attr) then
       begin
         Result := cncrDelayed;
@@ -2617,12 +2938,17 @@ type
     end;
   end;
 
+  // Determine whether the expression E needs to be expanded to call. Return true to indicate the need
+  // If you need to delay the judgment, the Attr marked E is eaDelayed
+  // E is TSymbolExpr or TExpr of type TProceduralType
+  // Ref is the symbol pointed to by E, which can be nil
+  // FunT is the type of E, which can be nil
   function IsCallNeed(E: TExpr; Ref: TSymbol; FunT: TProceduralType): boolean;
   begin
     case CallNeedCheck(E, Ref, FunT) of
       cncrDelayed:
       begin
-        Include(E.Attr, eaDelayed);
+        Include(E.Attr, eaDelayed); // Go to the parent to decide whether to call
         Result := False;
       end;
       cncrNeed: Result := True;
@@ -2631,11 +2957,14 @@ type
     end;
   end;
 
+  // Check and create opCALL expression
+  // Parameter E is an expression that returns TProceduralType, not a function symbol
   function CheckAdjustCall(E: TExpr): TExpr;
   begin
     Result := nil;
     if E.Typ.TypeCode <> typProcedural then
       Exit;
+    //  Assert(E.Typ.TypeCode = typProcedural, 'CheckAdjustCall');
     if IsCallNeed(E, nil, TProceduralType(E.Typ)) then
     begin
       Result := CreateCallExpr(E);
@@ -2650,6 +2979,13 @@ type
   begin
     if FCurFunction <> nil then
     begin
+    (*// Find top-level functions
+      F := Parser.FCurFunction;
+      while (F.Parent <> nil) and
+        (F.Parent.NodeKind in [nkFunc, nkMethod]) do
+      begin
+        F := TFunction(F.Parent);
+      end; *)
       F := FTopFunction;
       IsVis := Self.IsVisible(F, Sym);
     end
@@ -2659,10 +2995,12 @@ type
       ParseError(SErr_SymbolNotAccess, [Sym.Name]);
   end;
 
+  {Check if the member can access}
   function CanMemberAccess(Ref: TSymbol): boolean;
   var
     P1, P2: TType;
   begin
+    // If Ref is a field, attribute, or method, you need to check whether it is a member of the class where the current method is located.
     if Assigned(FTopFunction) and (Ref.NodeKind in [nkMethod, nkField, nkProperty, nkIntfProperty]) and
       not (saStatic in Ref.Attr) and not (saClass in Ref.Attr) then
     begin
@@ -2689,6 +3027,7 @@ type
       Result := True;
   end;
 
+  // Check the symbol, if this symbol is a function, an expression of opCALl may be created
   function CheckSymbol(sym: TSymbolExpr): TExpr;
   var
     Ref: TSymbol;
@@ -2708,9 +3047,13 @@ type
       CheckVisibility(Ref);
       sym.reference := Ref;
       case Ref.NodeKind of
+        // nkNameScope: sym.Typ := TNameScope(E).GetType;
+        // nkModule: sym.Typ := TModule(E).GetType;
+        // Because NameScope and Module have been removed in ParseExpr, they will not appear here
         nkNameScope,
         nkModule: Assert(False, 'NameScope and Module should not be occurred');
         nkType: sym.Typ := TType(Ref);
+        // Var, const, arg, field, if the type is procedure, you need to check whether it is a function call or as a variable
         nkVariable, nkFuncParam, nkConstant, nkField, nkProperty, nkIntfProperty:
         begin
           case Ref.NodeKind of
@@ -2731,12 +3074,15 @@ type
           if FCurFunction <> nil then
           begin
             case Ref.NodeKind of
-              nkVariable: if (FCurFunction.Level > TVariable(Ref).Level) and (vaLocal in TVariable(Ref).VarAttr) then
+              nkVariable: if (FCurFunction.Level > TVariable(Ref).Level)
+                          and (vaLocal in TVariable(Ref).VarAttr)
+                          {and (TVariable(Ref).Level > 0)} then
                 begin
                   Include(TVariable(Ref).States, vsNestRef);
                   Include(FCurFunction.FuncAttr, faNeedFPArg);
                 end;
-              nkFuncParam: if (FCurFunction.Level > TFuncParam(Ref).Level) then
+              nkFuncParam: if (FCurFunction.Level > TFuncParam(Ref).Level)
+                          {and (TFuncParam(Ref).Level > 0)} then
                 begin
                   Include(TFuncParam(Ref).States, asNestRef);
                   Include(FCurFunction.FuncAttr, faNeedFPArg);
@@ -2765,6 +3111,7 @@ type
             begin
               Result := CreateCallExpr(Sym);
               CheckCall(TBinaryExpr(Result));
+              // Ref is a nested function, the nesting level is not greater than the current function
               if (FCurFunction <> nil) and (Ref.NodeKind = nkFunc) and (TFunction(Ref).Level > 0) and
                 (TFunction(Ref).Level <= FCurFunction.Level) then
               begin
@@ -2774,6 +3121,8 @@ type
             cncrDelayed: Include(Sym.Attr, eaDelayed);
             cncrOther:
             begin
+              // It has been ensured that Ref.NodeKind in [nkMethod, nkFunc, nkExternalFunc]
+              // To take a function pointer, you need to use @
               Sym.Typ := TFunctionDecl(Ref).ProceduralType;
               Result := CreateProcAddrExpr(Sym);
             end;
@@ -2802,7 +3151,7 @@ type
 
   function CheckInst(un: TUnaryExpr): TExpr; forward;
 
-  function CheckSubSymbol(bin: TBinaryExpr): TExpr;
+  function CheckSubSymbol(bin: TBinaryExpr): TExpr;  // opMEMBER
 
     procedure TryAddInstOp;
     var
@@ -2847,8 +3196,22 @@ type
       begin
         TryAddInstOp;
       end;
-      case bin.Left.Typ.TypeCode
-        of
+      case bin.Left.Typ.TypeCode of
+      // Because NameScope and Module have been removed in ParseExpr, they will not appear here
+      {  typSymbol: begin
+          Ref := TSymbolExpr(bin.Left).Reference;
+          if Ref.NodeKind = nkNameScope then
+            Ref := TNameScope(Ref).FindSymbol(Sym.Name)
+          else if Ref.NodeKind = nkModule then
+            Ref := TModule(Ref).FindSymbol(Sym.Name)
+          else
+            Ref := nil;
+        end;}
+        {
+        typPointer: begin
+          NotAllowNode([nkType], bin.Left);
+          Ref := CheckRecPtr(TPointerType(bin.Left.Typ), Sym);
+        end;}
         typRecord:
         begin
           Ref := TRecordType(bin.Left.Typ).FindSymbol(Sym.Name);
@@ -2889,6 +3252,7 @@ type
             DoWarning(bin.Coord, SWarn_SymbolThroughInstance, [Sym.Name]);
         end;
         typInterface: Ref := TInterfaceType(bin.Left.Typ).FindSymbol(Sym.Name);
+        // todo 5: helper class will be added later
         else
           ParseError(bin.Coord, SErr_InvalidOperand);
       end;
@@ -2901,6 +3265,7 @@ type
     else
     begin
       Sym.reference := Ref;
+      // Because NameScope and Module have been removed in ParseExpr, they will not appear here
       if Ref.NodeKind in [nkNameScope, nkModule] then
         ParseError(bin.Coord, SErr_InvalidIdent, [Ref.Name]);
       CheckVisibility(Ref);
@@ -2942,6 +3307,8 @@ type
             cncrDelayed: Include(bin.Attr, eaDelayed);
             cncrOther:
             begin
+              // It has been ensured that Ref.NodeKind in [nkMethod, nkFunc, nkExternalFunc]
+              // To take a function pointer, you need to use @
               Sym.Typ := TFunctionDecl(Ref).ProceduralType;
               bin.Typ := Sym.Typ;
               Result := CreateProcAddrExpr(bin);
@@ -2994,6 +3361,7 @@ type
     end;
   end;
 
+  // The left side must be the same type as the right side
   procedure CheckRange(bin: TBinaryExpr);
   var
     L, R: TType;
@@ -3085,10 +3453,53 @@ type
     CheckIndexProperty(bin, DefProp);
   end;
 
+  {
+  function CheckIndexType(Typ: TType; E: TExpr): Boolean;
+    function CheckRangeType(t1, t2: TType): Boolean;
+    begin
+      if t1.TypeCode = typSubrange then t1 := TSubrangeType(t1).BaseType;
+      if t2.TypeCode = typSubrange then t2 := TSubrangeType(t2).BaseType;
+      case t1.TypeCode of
+        typEnum: Result := t1 = t2;
+        typInt:
+          Result := t2.TypeCode in [typInt, typVariant];
+        typVariant:
+          Result := True;
+      else
+        Result := t1.TypeCode = typ.TypeCode;
+      end;
+    end;
+  begin
+    if Typ = nil then
+    begin
+      Parser.ParseError(E.Coord, SErr_ArrayRequired);
+      Result := False;
+      Exit;
+    end;
+    Result := True;
+    case Typ.TypeCode of
+      typAnsiString..typShortString,
+      typPAnsiChar, typPWideChar:
+        if not E.Typ.IsInteger then
+          Parser.ParseError(E.Coord, SErr_IncompatibleTypes);
+      typDynamicArray:
+        if not E.Typ.IsInteger then
+          Parser.ParseError(E.Coord, SErr_IncompatibleTypes);
+      typArray:
+        if not CheckRangeType(E.Typ, TArrayType(Typ).Range) then
+          Parser.ParseError(E.Coord, SErr_IncompatibleTypes);
+    else
+      Parser.ParseError(E.Coord, SErr_ArrayRequired);
+      Result := False;
+    end;
+  end;  }
+
+  // check this dimension
   function CheckIndexType(var Typ: TType; E: TExpr): boolean;
 
     function CheckIndiceType(t1, t2: TType): boolean;
     begin
+      // t1: the type to be checked, t2: the expected type
       if t1.TypeCode = typSubrange then
         t1 := TSubrangeType(t1).BaseType;
       if t2.TypeCode = typSubrange then
@@ -3198,6 +3609,11 @@ type
     end;
     NotAllowNode([nkType], bin.Left);
     Ref := bin.Left.GetReference;
+    {Consider this situation:
+       obj.Symbols[i];
+       If Symbols is an Array Property, then IsArrayProp=True
+       If Symbols is a class, and this class has default properties, then IsDefProp=True
+     }
     IsArrayProp := False;
     IsDefProp := False;
     if Ref <> nil then
@@ -3218,6 +3634,7 @@ type
     end
     else if IsDefProp then
     begin
+      // Switch to access to the default attributes and check
       CheckDefaultProperty(bin, Ref);
     end
     else
@@ -3254,12 +3671,17 @@ type
       if bin.Typ.TypeCode = typVariant then
         Include(bin.Attr, eaVarOp);
     end;
+    // If this Property returns a process variable, it should be checked whether it is converted to a call
+    // Such as: Ctrl.OnClick[1];
+    // Ctrl.OnClick;
+    // Ctrl.Procs[1];
     if bin.Typ.TypeCode = typProcedural then
       Result := CheckAdjustCall(bin);
   end;
 
   procedure NormalAddrOp(un: TUnaryExpr);
   begin
+    // Adjust the pointer type according to the state of $T+
     if FTypedAddress then
     begin
       if un.Operand.Typ.TypeCode = typUntype then
@@ -3292,6 +3714,9 @@ type
     Func: TFunctionDecl;
     Ref: TSymbol;
   begin
+    {On the @@ operator on function pointers. There is no need to keep two @nodes here.
+       AST means that the call and address are already clear
+     }
     Result := un;
     if not (un.Operand.HasMemory or un.Operand.IsFunction) then
     begin
@@ -3300,6 +3725,7 @@ type
       Exit;
     end;
     Ref := un.Operand.GetReference;
+    // Cannot use @ for Self
     if (Ref <> nil) and (Ref.NodeKind = nkVariable) and (vaSelf in TVariable(Ref).VarAttr) then
     begin
       ParseError(un.Coord, SErr_InvalidOperand);
@@ -3312,6 +3738,8 @@ type
       Func := nil;
     if (Func <> nil) then
     begin
+      // @proc takes the function/method address, the final type of fpc is TProceduralType
+      // delphi is TPointerType. And does not accept @obj.method this form
       if synProcvarFpc in FSyntaxOptions then
       begin
         un.Typ := Func.ProceduralType;
@@ -3319,21 +3747,25 @@ type
       else
       begin
         un.Typ := FContext.FPointerType;
+        // todo 1: If operand is not referenced by a class name like tobject.classinfo, an error will be reported
       end;
       if Func.IsOverload then
         Include(un.Attr, eaDelayed);
     end
     else if un.Operand.Typ.TypeCode = typProcedural then
     begin
+      // For @procvar, fpc is interpreted as taking the variable address
       if synProcvarFpc in FSyntaxOptions then
         NormalAddrOp(un)
       else
       begin
+        // Take the value stored in the variable. Remove the @ operator
         Result := un.Operand;
         Result.Detach;
         if Result.Typ = nil then
           Result.Typ := FContext.FPointerType;
         SubstituteExpr(un, Result);
+        //  SubstituteExpr(un, un.Operand);
         Self.ReleaseExpr(un);
         un := nil;
       end;
@@ -3372,20 +3804,32 @@ type
     i: integer;
   begin
     Result := E;
+    // Must be in a method or its nested function.
+    // The method called must be owned by the base class.
     if (FTopFunction = nil) or (FTopFunction.NodeKind <> nkMethod) then
     begin
       ParseError(E.Coord, SErr_InheritedNotAllow);
       Exit;
     end;
+    {Several formats:
+       inherited; // ok A single inherited, which means to call the method of the same name of the base class.
+       inherited docheck; // ok calls the specified method of the base class
+       result := inherited docheck; // ok is placed in the expression
+       result := inherited prop // ok property
+       result := inherited; // error inherited in the expression must take identifiers and parameters
+     }
     if E.Operand = nil then
     begin
       Sym := GetBaseSymbol(FTopFunction.Name);
       if Sym = nil then
       begin
+        // inherited cannot omit the called method identifier in the expression
         if E.Parent <> nil then
           ParseError(E.Coord, SErr_InheritedExpectId)
         else
         begin
+          // If the base class does not have a method with the same name, and it is not in an expression, ignore this sentence.
+          // Create an air conditioner  // Probably wrong translation, this is the original Chinese text: // 创建一个空调用
           CallE := CreateBinaryExpr(opCALL);
           CallE.Coord := E.Coord;
           CallE.Typ := FContext.FUntype;
@@ -3418,6 +3862,7 @@ type
       CallE.Right := CreateListExpr;
       CallE.Right.Typ := FContext.FUntype;
       CallE.Right.Coord := E.Coord;
+      // copy args
       for i := 0 to FTopFunction.ParamCount - 1 do
       begin
         SymE := CreateSymbolExpr(FTopFunction.Params[i].Name);
@@ -3476,20 +3921,32 @@ type
   var
     Sym: TSymbol;
   begin
+    // Must be in a method or its nested function.
+    // The method called must be owned by the base class.
     if (FTopFunction = nil) or (FTopFunction.NodeKind <> nkMethod) then
     begin
       ParseError(E.Coord, SErr_InheritedNotAllow);
       Exit;
     end;
+    {Several formats:
+       inherited; // ok A single inherited, which means to call the method of the same name of the base class.
+       inherited docheck; // ok calls the specified method of the base class
+       result := inherited docheck; // ok is placed in the expression
+       result := inherited; // error inherited in the expression must take identifiers and parameters
+       result := inherited prop // ok property or field
+     }
     if (E.Left = nil) then
     begin
       Sym := GetBaseSymbol(FTopFunction.Name);
       if Sym = nil then
       begin
         if E.Parent <> nil then
+          // inherited in the expression cannot omit the called method identifier
           ParseError(E.Coord, SErr_InheritedExpectId)
         else
         begin
+          // If the base class does not have a method with the same name, and it is not in an expression, ignore this sentence.
+          // Create an air conditioner  // Probably wrong translation, this is the original Chinese text: // 创建一个空调用
           E.Typ := FContext.FUntype;
           E.Left := CreateSymbolExpr(FContext.FNoopFunc.Name);
           TSymbolExpr(E.Left).reference := FContext.FNoopFunc;
@@ -3512,6 +3969,7 @@ type
       E.Left.Coord := E.Coord;
       E.Right := CreateListExpr;
       E.Right.Coord := E.Coord;
+      // Construct parameters.
     end
     else
     begin
@@ -3531,6 +3989,7 @@ type
       E.Left.Typ := FContext.FUntype;
       if E.Right = nil then
         E.Right := CreateListExpr;
+        //      CheckSymbol(E.Left);
     end;
     CheckCall(E);
   end;
@@ -3590,7 +4049,10 @@ type
       vtBool: E.Typ := FContext.FBooleanType;
       vtPtr, vtSymbol, vtAddrOfSymbol, vtAddrOffset: E.Typ := FContext.FPointerType;
       vtSet: Assert(False, 'CheckConst:vtSet');
-      vtArray, vtRecord: Assert(False, 'CheckConst:vtArray/vtRecord');
+      //E.Typ := FContext.FEmptySetType;
+      vtArray, vtRecord:
+      // The composite type of array, record will not be evaluated here
+      Assert(False, 'CheckConst:vtArray/vtRecord');
     end;
     Include(E.Attr, eaConst);
   end;
@@ -3619,6 +4081,8 @@ type
     Result := Expr;
     if Expr = nil then
       Exit;
+    // also check the ones that have been marked as invalid
+    // For Expr, you can replace itself, but not its parent node
     OldErr := FErrorCount;
     un := nil;
     bin := nil;
@@ -3632,6 +4096,7 @@ type
       opkBinary:
       begin
         bin := TBinaryExpr(Expr);
+        //if bin.OpCode <> opINHERITED then
         DoCheck(bin.Left);
         if bin.OpCode <> opMEMBER then
           DoCheck(bin.Right);
@@ -3665,7 +4130,7 @@ type
       opSYMBOL: Result := CheckSymbol(TSymbolExpr(Expr));
       opRANGE: CheckRange(bin);
       opINDEX: Result := CheckIndex(bin);
-      opINHERITED: CheckInherited(un);
+      opINHERITED: CheckInherited(un); //CheckInherited(bin);
       opSET: CheckSetOp(un);
       opLIST:
       begin
@@ -3702,6 +4167,7 @@ begin
     (OldErr = FErrorCount) and not (eaInvalid in Expr.Attr);
   if not Result then
     Include(Expr.Attr, eaInvalid);
+  //  if FErrorCount > 0 then Expr.Typ := FContext.FAnytype;
 end;
 
 procedure TParser.CheckForward;
@@ -3729,7 +4195,7 @@ procedure TParser.CheckForward;
     begin
       sym := symbols[i];
       case sym.NodeKind of
-        nkType: CheckForward_Method(TType(sym));
+        nkType: CheckForward_Method(TType(sym)); // Nested class, object, record.
         nkMethod: if TMethod(sym).StartStmt = nil then
             ParseError(sym.Coord, SErr_MethodNotImpl, [sym.Name]);
       end;
@@ -3794,6 +4260,8 @@ end;
 procedure TParser.ClearScopes;
 begin
   FScopeList.Clear;
+  //  while FScopeList.Count > 0 do
+  //    LeaveScope;
 end;
 
 procedure TParser.ClearWithList;
@@ -3810,12 +4278,22 @@ begin
   FScanner.OnIfDefined := OnScannerIfDefined;
   FScanner.OnIfOpt := OnScannerIfOpt;
   FScanner.OnIfEval := OnScannerIfEval;
+  //  FScanner.CodeSwitches := @FCodeSwitches;
+  //  Include(FCodeSwitches, cdOverflowChecks);
   FContext := AContext;
+  //  FSyntaxOptions := [synProcvarFpc];
   FAlignSize := 4;
   FPointerSize := SizeOf(Pointer);
   FMinEnumSize := 1;
   FHeader := TFunctionHeader.Create;
   FQId := TQualifiedId.Create;
+  //FNodes := TList.Create;
+  //FNodes.Capacity := 1024 * 64;
+  //FTempExprList := TList.Create;
+  //FTempExprList.Capacity := 100;
+  //FExprList := TList.Create;
+  //FExprList.Capacity := 1024 * 64;
+  //FCurExprList := FExprList;
   FScopeList := TFPList.Create;
   FScopeList.Capacity := 16;
   FWithList := TFPList.Create;
@@ -3905,6 +4383,7 @@ end;
 function TParser.CreateType(TypClass: TTypeClass): TType;
 begin
   Result := TType(CreateElement(TypClass));
+  //  InitAstNode(Result);
 end;
 
 function TParser.CreateUnaryExpr(op: TExprOpCode; Operand: TExpr): TUnaryExpr;
@@ -3927,10 +4406,14 @@ end;
 
 destructor TParser.Destroy;
 begin
+  //ClearNodes;
   ClearScopes;
   ClearWithList;
   FWithList.Free;
   FScopeList.Free;
+  //FNodes.Free;
+  //FTempExprList.Free;
+  //FExprList.Free;
   FExternSymbols.Free;
   FDefinedSymbols.Free;
   FScanner.Free;
@@ -4038,6 +4521,16 @@ begin
   Result := FExternSymbols.Find(S);
 end;
 
+{function TParser.FindSymbol(M: TModule; const S: string): TSymbol;
+begin
+  if M = nil then
+    Result := FindSymbol(S)
+  else if M = FModule then
+    Result := FModule.FindSymbol(S)
+  else
+    Result := FExternSymbols.Find(M, S);
+end;}
+
 function TParser.FindSymbol(Typ: TType; const S: string): TSymbol;
 begin
   case Typ.TypeCode of
@@ -4103,6 +4596,7 @@ function TParser.GetOverloadNext: TFunctionDecl;
     Result := nil;
     if T = nil then
       Exit;
+    // todo 1: You may need to consider a class that implements the interface
     repeat
       Sym := T.FindCurSymbol(FCurOverloadFunc.Name);
       if Sym.NodeKind = nkMethod then
@@ -4162,9 +4656,11 @@ function TParser.GetOverloadNext: TFunctionDecl;
   var
     Sym: TSymbol;
   begin
+    // Take external symbols
     if FCurSymbolPos = nil then
     begin
       FCurSymbolPos := FExternSymbols.GetStart(FCurOverloadFunc.Name);
+      // Skip first
       FExternSymbols.GetNext(FCurSymbolPos);
     end;
     repeat
@@ -4182,6 +4678,7 @@ function TParser.GetOverloadNext: TFunctionDecl;
   var
     P, Sym: TSymbol;
   begin
+    //    if FCurOverloadFunc.Parent.NodeKind = nkModule then
     if (FCurOverloadFunc.Module <> Self.FModule) then
     begin
       Result := NextOverloadExternal;
@@ -4192,6 +4689,7 @@ function TParser.GetOverloadNext: TFunctionDecl;
     begin
       if P.NodeKind in [nkFunc, nkMethod] then
         P := P.Parent;
+      // Allow nested function overloading
       while P.NodeKind in [nkFunc, nkMethod] do
       begin
         Sym := TFunction(P).LocalSymbols.Find(FCurOverloadFunc.Name);
@@ -4202,6 +4700,7 @@ function TParser.GetOverloadNext: TFunctionDecl;
         end;
         P := P.Parent;
       end;
+      // Take the module
       while P.NodeKind <> nkModule do
       begin
         P := P.Parent;
@@ -4214,6 +4713,7 @@ function TParser.GetOverloadNext: TFunctionDecl;
         Exit;
       end;
     end;
+    // Take external symbols
     if FCurSymbolPos = nil then
       FCurSymbolPos :=
         FExternSymbols.GetStart(FCurOverloadFunc.Name);
@@ -4250,6 +4750,7 @@ end;
 
 function TParser.GetSetType(typ: TEnumType): TSetType;
 begin
+  // todo 1: Take into account that this Subrange range exceeds 0..255
   Result := GetSetType(GetSubrangeType(typ));
 end;
 
@@ -4392,6 +4893,9 @@ function TParser.IsVisible(Ref, Referred: TSymbol): boolean;
 
   function PrivCanAccess(Ref: TSymbol; Referred: TType): boolean;
   begin
+    // Determine whether Ref can access the private members of Referred
+    // As long as Ref is a member of Referred or a member of nested type
+    // Or Ref and Referred are the same unit
     while
       Ref.Parent <> nil do
     begin
@@ -4476,6 +4980,16 @@ begin
   S := Referred.Parent;
   if S = nil then
     Exit;
+  {
+  visDefault,
+  visPrivate,         [Owner, NestOfOwner, Module]
+  visProtected,       [Owner, NestOfOwner, Module, SubOfOwner]
+  visPublic,          [Owner, NestOfOwner, Module, SubOfOwner, Outter]
+  visPublished,       [Owner, NestOfOwner, Module, SubOfOwner, Outter]
+  visAutomated,       [Owner, NestOfOwner, Module, SubOfOwner, Outter]
+  visStrictPrivate,   [Owner, NestOfOwner]
+  visStrictProtected  [Owner, NestOfOwner, SubOfOwner]
+  }
   case S.NodeKind of
     nkType: if TType(S).TypeCode in [typClass, typObject, typRecord] then
       begin
@@ -4491,7 +5005,7 @@ begin
         end;
       end
       else if TType(S).TypeCode = typInterface then
-        Result := True
+        Result := True  // Symbols at the Module level can be used
       else
         ParseError(SErr_InternalError, ['Referred.Parent invalid']);
     nkModule, nkFunc, nkMethod: Result := True;
@@ -4589,8 +5103,7 @@ begin
   ParseError(Msg, Stop);
 end;
 
-procedure TParser.
-OnScannerIfDefined(const S: string; out IsDefined: boolean);
+procedure TParser.OnScannerIfDefined(const S: string; out IsDefined: boolean);
 begin
   IsDefined := FDefinedSymbols.IsExists(S);
 end;
@@ -4603,6 +5116,7 @@ var
   FBakTokens: array[0..MAX_UNGET] of TTokenInfo;
   FBakIndex, FBakHead: smallint;
 begin
+  // Save
   for I := 0 to High(FBakTokens) do
     FBakTokens[I] := FTokenBuffer[I];
   FBakIndex := FTokenIndex;
@@ -4632,6 +5146,7 @@ begin
   end;
   ValClear(V);
   ReleaseExpr(E);
+  // Restore
   for I := 0 to High(FBakTokens) do
     FTokenBuffer[I] := FBakTokens[I];
   FTokenIndex := FBakIndex;
@@ -4687,8 +5202,9 @@ function TParser.ParseAddExpr: TExpr;
       tkOr: Result := opOR;
       tkXor: Result := opXOR;
       else
-        Result :=
-          opNone;
+        Result := opNone;
+//      tkPower                 : Result := opPower;
+//      tkSymmetricalDifference : Result := opSymmetricalDifference;
     end;
   end;
 
@@ -4696,6 +5212,10 @@ var
   left, right: TExpr;
   op: TExprOpCode;
 begin
+  {
+  <AddExpr>		::= <MulExpr>
+  			  | <AddExpr> <AddOp> <MulExpr>
+  }
   Result := ParseMulExpr;
   op :=
     AddOp(CurToken);
@@ -4727,6 +5247,9 @@ procedure TParser.ParseBlock(Parent: TSymbol);
   end;
 
 begin
+  {
+  <Block>			::= <OptDeclSection> <OptExportBlock> <CompoundStmt> <OptExportBlock>
+  }
   while True do
   begin
     case CurToken of
@@ -4762,7 +5285,42 @@ function TParser.ParseCaseStmt: TCaseStmt;
   begin
     ParseError(Coord, SErr_IncompatibleTypes2, [TypeNames[t1], TypeNames[t2]]);
   end;
-
+  {
+   function CheckCaseList(List: TListExpr; Typ: TType): Boolean;
+     function CheckCaseExpr(E: TExpr; ExpectTyp: TType): Boolean;
+     var
+       T2: TType;
+     begin
+       Result := CheckConstExpr(E);
+       if not Result then Exit;
+       T2 := E.Typ.NormalType;
+       if not CheckAssignCompatibility(ExpectTyp, T2) then
+       begin
+         Result := False;
+         IncompatibleErr(E.Coord, ExpectTyp.TypeCode, T2.TypeCode);
+       end;
+     end;
+   var
+     E: TExpr;
+     I: Integer;
+   begin
+     for I := 0 to List.Count - 1 do
+     begin
+       E := List.Items[I];
+       if E.OpCode = opRANGE then
+       begin
+         Result := CheckCaseExpr(TBinaryExpr(E).Left, Typ)
+             and CheckCaseExpr(TBinaryExpr(E).Right, Typ);
+       end
+       else
+       begin
+         Result := CheckCaseExpr(E, Typ);
+       end;
+       if not Result then Exit;
+     end;
+     Result := True;
+   end;
+  }
   function CheckCaseExpr(E: TExpr; ExpectTyp: TType): boolean;
   var
     T2: TType;
@@ -4855,8 +5413,7 @@ begin
   end;
   Expect(tkOf);
   NextToken;
-  while
-    True do
+  while True do
   begin
     case CurToken of
       tkElse:
@@ -4867,35 +5424,37 @@ begin
       tkEnd: Break;
       else
         E := ParseSetElementList as TListExpr;
-        Expect(
-          tkColon);
+        // CheckCaseList(E, Result.Expr.Typ);
+        Expect(tkColon);
         NextToken;
+        // parse stmt;
         Selector := TCaseSelector.Create;
         Result.AddSelector(Selector);
         AddRanges(Selector, Result, E);
         ReleaseExpr(E);
         Selector.Stmt := ParseStatement(Result);
+//      Expect(tkSemicolon);
         if CurToken = tkSemicolon then
           NextToken;
     end;
   end;
   Expect(tkEnd);
   NextToken;
+  // todo 1: Check if the case value is repeated
 end;
 
-function TParser.
-ParseClassRefType: TClassRefType;
+function TParser.ParseClassRefType: TClassRefType;
 var
   Typ: TType;
   Sym: TSymbol;
 begin
-  NextToken;
+  NextToken;  // skip 'of'
   sym := ParseQualifiedSym;
   if Sym = nil then
   begin
     if FQId.CountOfNames = 1 then
     begin
-      Typ := TUnresolvedType.Create;
+      Typ := TUnresolvedType.Create;  // Do not use CreateElement, because this TUnresolvedType will be released
       Typ.Name := FQID.Name;
     end
     else
@@ -4912,6 +5471,12 @@ begin
   else
     Typ := TType(Sym);
   FQID.Reset;
+  {if Typ.TypeCode = typClass then
+    Result := TClassType(Typ).GetClassRef
+  else begin
+    parseError(SErr_ClassRequired);
+    Result := FContext.FTObjectType.GetClassRef
+  end;}
   Result := TClassRefType(CreateType(TClassRefType));
   if Typ.TypeCode = typClass then
     Result.RefType := TClassType(Typ)
@@ -4928,7 +5493,7 @@ function TParser.ParseClassType(const TypName: string; Parent: TSymbol; out NotA
   var
     Typ: TSymbol;
   begin
-    NextToken;
+    NextToken; // skip '('
     Typ := ParseQualifiedSym;
     if Typ.NodeKind = nkType then
       Typ := TType(Typ).OriginalType;
@@ -4941,6 +5506,7 @@ function TParser.ParseClassType(const TypName: string; Parent: TSymbol; out NotA
       ParseError(Result.Coord, SErr_ClassNotComplete, [Result.Base.Name]);
     while CurToken = tkComma do
     begin
+      // Analyze interface list
       NextToken;
       Typ := ParseQualifiedSym;
       if (Typ.NodeKind <> nkType) or (TType(Typ).TypeCode <> typInterface) then
@@ -5007,6 +5573,7 @@ type
       ParseError(Meth.Coord, SErr_NoVirtualMethod, [Meth.Name]);
       Exit;
     end;
+// repeat
     BaseMeth := TMethod(Sym);
     Ok2 := cfOk;
     repeat
@@ -5031,6 +5598,8 @@ type
         cfDiffers: ParseError(Meth.Coord, SErr_OverridedDiffers, [Meth.Name]);
       end;
     end;
+//  Meth := TMethod(Meth.NextOverload);
+//until Meth = nil;
   end;
 
   function IsImplemented(typ: TClassType; IntfMeth, ImplMeth: TMethod): TOverrideCheckFlag;
@@ -5052,6 +5621,8 @@ type
     ImplMeth: TMethod;
     Ok, Ok2: TOverrideCheckFlag;
   begin
+    // Find the method name in the current class and base class.
+    // The corresponding method of the base class can also be regarded as an implementation.
     Sym := typ.FindSymbol(IntfMeth.Name);
     if (Sym = nil) or (Sym.NodeKind <> nkMethod) then
     begin
@@ -5086,6 +5657,9 @@ type
   begin
     for I := 0 to Intf.AllSymbols.Count - 1 do
     begin
+      // The current class must implement all methods of this interface including the parent interface
+      // Even if the base class has implemented the parent interface, the function that implements the interface is not accessible,
+      // Same as unfulfilled
       IntfMeth := Intf.AllSymbols[I];
       if IntfMeth.NodeKind <> nkMethod then
         Continue;
@@ -5109,7 +5683,18 @@ type
     if [fmOverride, fmVirtual] * Meth.Modifiers <> [] then
       ParseError(Meth.Coord, SErr_MessageMethodDirective);
   end;
-
+  {  procedure CheckDup(Result: TClassType; M: TMethod);
+    var
+      DupSym: TSymbol;
+    begin
+      while M <> nil do
+      begin
+        DupSym := Result.FindBaseSymbol(M.Name);
+        if DupSym.NodeKind = nkMethod then
+          DoCheckDup
+        M := TMethod(M.NextOverload);
+      end;
+    end; }
   procedure CheckClass(typ: TClassType);
   var
     I, Def: integer;
@@ -5124,17 +5709,24 @@ type
     for I := 0 to typ.Symbols.Count - 1 do
     begin
       Sym := typ.Symbols[I];
+      // check virtual function
       case Sym.NodeKind of
-        nkMethod: if fmOverride in TMethod(Sym).Modifiers then
+        nkMethod:
+          if fmOverride in TMethod(Sym).Modifiers then
             CheckOverrides(typ, TMethod(Sym))
           else if fmMessage in TMethod(Sym).Modifiers then
             CheckMsgMethod(TMethod(Sym));
-        nkProperty: if paDefaultProp in TProperty(Sym).PropAttr then
+        nkProperty:
+          // Check that there can only be one default attribute
+          if paDefaultProp in TProperty(Sym).PropAttr then
             Inc(Def);
       end;
     end;
     if Def > 1 then
       ParseError(typ.Coord, SErr_DefaultPropDuplicated);
+    // todo 1: Check attribute redeclaration
+
+    // Check the interface implementation
     for I := 0
       to typ.InterfaceCount - 1 do
     begin
@@ -5142,6 +5734,26 @@ type
       if (TType(Sym).TypeCode = typInterface) then
         CheckIntf(typ, typ.IntfEntries[I], TInterfaceType(Sym));
     end;
+
+   // todo 1: Check for functions with the same name as the base class and the base class is virtual
+   { for I := 0 to typ.Members.Count - 1 do
+    begin
+      Sym := TSymbol(typ.Members[I]);
+      if Sym.NodeKind = nkMethod then
+        CheckDup(typ, TMethod(Sym));
+    end; }
+
+   // todo 1: Check if all abstract methods of the base class are implemented
+  {  if (typ.Base <> nil) and (caAbstract in typ.Base.ClassAttr) then
+    begin
+      for I := 0 to Result.Base.Symbols.Count - 1 do
+      begin
+        Sym := Result.Symbols[I];
+        if Sym.NodeKind <> nkMethod then Continue;
+        if fmAbstract in TMethod(Sym).Modifiers then
+          ;
+      end;
+    end;}
   end;
 
   procedure CheckMethodResolution(typ: TClassType);
@@ -5182,6 +5794,9 @@ var
   OldVis: TMemberVisibility;
   ClassPrefix, ClassVar: boolean;
 begin
+  // NextToken;
+  // CurToken is a token after 'class'
+
   Result := FindForwardClass(TypName);
   if Result <> nil then
   begin
@@ -5194,6 +5809,7 @@ begin
     Result.Name := TypName;
     NotAddSym := False;
   end;
+  // forward decl
   if CurToken = tkSemicolon then
   begin
     Include(TSymbol(Result).Attr, saForward);
@@ -5222,6 +5838,7 @@ begin
     ParseBaseClass(Result);
   if Result.Base = nil then
     Result.Base := FContext.FTObjectType;
+  // TMyObj = class(TObject); This case is a complete class definition
   if CurToken = tkSemicolon then
   begin
     StateRestore(StateInfo);
@@ -5265,8 +5882,7 @@ begin
       end;
       tkPublished:
       begin
-        FCurVisibility :=
-          visPublished;
+        FCurVisibility := visPublished;
         NextToken;
       end;
       tkStrict:
@@ -5321,6 +5937,7 @@ begin
       end;
       tkFunction, tkProcedure, tkConstructor, tkDestructor:
       begin
+        // todo 1: Need to increase MethodResolution
         MethSym := ParseFunction(Result);
         case MethSym.NodeKind of
           nkMethod:
@@ -5365,6 +5982,7 @@ begin
   LeaveScope;
   FCurParent := OldParent;
   FCurVisibility := OldVis;
+  // Check Symbols
   if FErrorCount = OldErr then
   begin
     CheckMethodResolution(Result);
@@ -5378,7 +5996,7 @@ function TParser.ParseCompoundStmt: TCompoundStmt;
 var
   Stmt: TStatement;
 begin
-  NextToken;
+  NextToken; // skip 'begin'
   Result := TCompoundStmt(CreateStmt(TCompoundStmt));
   Result.IncludeBegin := True;
   while CurToken <> tkEnd do
@@ -5389,7 +6007,7 @@ begin
     if CurToken = tkSemicolon then
       NextToken;
   end;
-  NextToken;
+  NextToken; // skip 'end'
 end;
 
 procedure TParser.ParseConstArray(Typ: TArrayType; var V: TValueRec);
@@ -5428,6 +6046,9 @@ procedure TParser.ParseConstArray(Typ: TArrayType; var V: TValueRec);
           isOk := ParseConstSimpleValue(typ.ElementType, V, ValT);
           if isOk then
             isOk := CheckAssignCompatibility(typ.ElementType, ValT);
+          // No default value is needed, because the array data will not be referenced by other constants.
+          // else
+          // ValDefault(V, typ.ElementType);
         end;
         if not isOk or not Value.Put(Offset, V) then
           ParseError(SErr_AssignIncomp);
@@ -5546,9 +6167,14 @@ procedure TParser.ParseConstSection(Parent: TSymbol);
 var
   C: TSymbol;
   Typ, ValTyp: TType;
+  //  E: TExpr;
   StateInfo, S2, S3: TParseStateInfo;
 begin
-  NextToken;
+  {
+  <ConstantDecl>		::= <RefId> '=' <ConstExpr> <OptPortDirectives> ';'
+			    | <RefId> ':' <Type> '=' <TypedConstant> <OptPortDirectives> ';'
+  }
+  NextToken; // skip 'const'
   StateSet(psInVar, StateInfo);
   Expect(tkIdentifier);
   repeat
@@ -5579,6 +6205,7 @@ begin
     end;
     C.Visibility := FCurVisibility;
     ValClear(FTempValue);
+    // parse init value
     if (C.NodeKind = nkVariable) and (TVariable(c).VarType.TypeCode in [typArray, typRecord]) then
     begin
       if TVariable(c).VarType.TypeCode = typArray then
@@ -5587,8 +6214,7 @@ begin
         ValClear(TVariable(c).Value);
         TVariable(c).Value.VT := vtArray;
         TVariable(c).Value.VArray := FTempValue.VArray;
-        FTempValue.VT :=
-          vtEmpty;
+        FTempValue.VT := vtEmpty;
       end
       else
       begin
@@ -5597,6 +6223,7 @@ begin
         TVariable(c).Value.VT := vtRecord;
         TVariable(c).Value.VRecord := FTempValue.VRecord;
         FTempValue.VT := vtEmpty;
+        //ParseError(c.Coord,'Currently does not support record and array constant expression', True);
       end;
     end
     else if ParseConstSimpleValue(Typ, FTempValue, ValTyp) then
@@ -5619,9 +6246,12 @@ begin
     begin
       if C.NodeKind = nkConstant then
       begin
+        // Force the analysis to be aborted. Because this constant may be referenced in multiple places in the future,
+        // Unable to determine its value, it is difficult to perform future analysis.
         ParseError(C.Coord, SErr_InvalidConstExpr, True);
       end
       else
+        // The analysis fails, give a default value to facilitate the analysis. The default value is not necessary for the variable
         ValDefault(TVariable(C).Value, TVariable(C).VarType);
     end;
     if C.NodeKind <> nkVariable then
@@ -5633,8 +6263,7 @@ begin
     Expect(tkSemicolon);
     AddSymbol(C);
     if (C.NodeKind = nkVariable) and (Parent.NodeKind in [nkFunc, nkMethod]) then
-      TVariable(C).
-        Level := TFunction(Parent).Level;
+      TVariable(C).Level := TFunction(Parent).Level;
     NextToken;
   until CurToken <> tkIdentifier;
   StateRestore(StateInfo);
@@ -5657,7 +6286,7 @@ begin
   E := ParseConstExpr;
   ValClear(Value);
   if CheckConstExpr(E) and TryEvalGet(E, Value) then
-  begin
+  begin  // Must CheckConstExpr, so that Addr will be evaluated correctly
     ValTyp := E.Typ;
     if Assigned(typ) then
       CheckConstRange(typ, Value);
@@ -5713,6 +6342,18 @@ function TParser.ParseDesignator: TExpr;
 var
   L, R: TExpr;
 begin
+  {
+<FieldDesignator>	::= <RefId>
+			  | <FieldDesignator> '.' <RefId>
+<Designator>		::= <FieldDesignator>
+			  | <Designator> '.' <FieldDesignator>
+			  | <Designator> '^'
+			  | <Designator> '[' <ExprList> ']'
+			  | <Designator> '(' <ExprList> ')' !FunctionCall or TypeCast
+			  | <Designator> '('  ')'           !FunctionCall
+			  | '(' <Designator> ')'
+			  | INHERITED <Designator>
+}
   if CurToken = tkBraceOpen then
   begin
     NextToken;
@@ -5724,6 +6365,9 @@ begin
   end;
   if CurToken = tkInherited then
   begin
+    // inherited has a higher priority:
+    // inherited BaseMeth[1]; => (inherited BaseMeth)[1];
+    //
     if (psInTypeExpr in FCurStates) or (psInConstExpr in FCurStates) then
       ParseError(SErr_InheritedNotAllow, True);
     NextToken;
@@ -5732,6 +6376,17 @@ begin
     begin
       TUnaryExpr(Result).Operand := CreateSymbolExpr(CurTokenString);
       NextToken;
+        {  if CurToken = tkBraceOpen then // parameters
+      begin
+        NextToken;
+        if CurToken = tkBraceClose then
+          R := CreateListExpr
+        else
+          R := ParseExprList;
+        TBinaryExpr(Result).Right := R;
+        Expect(tkBraceClose);
+        NextToken;
+      end; }
     end;
   end
   else if CurToken = tkString then
@@ -5753,6 +6408,8 @@ begin
       begin
         L := Result;
         Result := CreateBinaryExpr(opMEMBER);
+        // Allow reserved words to appear after tkDot(.)
+        // such as MyUnit.Type
         Scanner.NoReservedWord := True;
         NextToken;
         Scanner.NoReservedWord := False;
@@ -5770,13 +6427,13 @@ begin
           Result := CreateUnaryExpr(opINST, L);
           NextToken;
         end;
-      tkBraceOpen:
+      tkBraceOpen:  // Function call or type conversion
       begin
         L := Result;
-        Result := CreateBinaryExpr(opCALL);
+        Result := CreateBinaryExpr(opCALL);  // Tentatively scheduled as a function call
         if L.IsTypeSymbol then
           Result.OpCode := opCAST;
-        NextToken;
+        NextToken;   // skip '('
         if Result.OpCode = opCAST then
         begin
           if CurToken = tkBraceClose then
@@ -5883,8 +6540,7 @@ function TParser.ParseExpr: TExpr;
       tkLessThan: Result := opLT;
       tkEqual: Result := opEQ;
       tkGreaterThan: Result := opGT;
-      tkNotEqual: Result :=
-          opNE;
+      tkNotEqual: Result := opNE;
       tkLessEqualThan: Result := opLE;
       tkGreaterEqualThan: Result := opGE;
       tkIs: Result := opIS;
@@ -5899,9 +6555,20 @@ var
   left, right: TExpr;
   op: TExprOpCode;
 begin
+  {
+  <Expr>			::= <AddExpr>
+			    | <AddExpr> <RelOp> <AddExpr>
+			    | SynError
+  }
   Result := ParseAddExpr;
   if psInTypeExpr in FCurStates then
   begin
+    // Analysis type expression
+    {
+    MySubrange = a.b * 2 div 1 .. 100;
+    My2 = 1>2..True;
+    My3 = sizeof(Integer)..Sizeof(Double)
+    }
     if Result.OpCode in [opSYMBOL, opMEMBER] then
       Exit;
   end;
@@ -5920,6 +6587,10 @@ function TParser.ParseExprList: TExpr;
 var
   L: TExpr;
 begin
+  {<ExprList>		::= <Expr>
+			  | <ExprList> ',' <Expr>
+  }
+  // Read the expression list, the number must be >= 1
   Result := CreateListExpr;
   L := ParseExpr;
   TListExpr(Result).Add(L);
@@ -5936,6 +6607,21 @@ function TParser.ParseFactor: TExpr;
 var
   L: TExpr;
 begin
+  {
+<Factor>		::= NIL
+			  | <ICONST>
+			  | <RCONST>
+			  | <SCONST>
+			  | <Designator>
+			  | <SetConstructor>
+			  | '@' <Designator>
+			  | '@' '@' <Designator> !returns memory address of a procedural variable
+			  | '(' <Expr> ')'
+			  | '(' <Expr> ')' '^'
+			  | '+' <Factor>
+			  | '-' <Factor>
+			  | NOT <Factor>
+}
   case Self.CurToken of
     tkNil:
     begin
@@ -5949,6 +6635,8 @@ begin
     tkPlus:
     begin
       NextToken;
+          //  L := ParseFactor;
+    //  Result := CreateUnaryExpr(opPOS, L);
       Result := ParseFactor;
     end;
     tkMinus:
@@ -6021,6 +6709,7 @@ begin
   NextToken;
   Typ := ParseTypeDecl;
   Hints := [];
+  //  if CurToken = tkIdentifier then // parse hint
   Hints := ParseHints;
   Result := Field;
   while Field <> nil do
@@ -6039,7 +6728,7 @@ var
   Typ: TType;
   StateInfo: TParseStateInfo;
 begin
-  NextToken;
+  NextToken;  // skip 'for'
   Expect(tkIdentifier);
   Typ := nil;
   E := FindSymbol(CurTokenString);
@@ -6057,6 +6746,7 @@ begin
     if (Typ <> nil) and not Typ.IsOrdinal then
       ParseError('For loop control variable must be ordinal type', [CurTokenString]);
   end;
+  // todo 1: To check that the loop control variable cannot be assigned
   Result := TForStmt(CreateStmt(TForStmt));
   Result.Value := E;
   NextToken;
@@ -6070,8 +6760,8 @@ begin
   else
     Expect(tkTo);
   NextToken;
-  Result.Stop :=
-    ParseExpr;
+  Result.Stop := ParseExpr;
+  // check expression
   if (Typ <> nil) and CheckExpr(Result.Start) and CheckExpr(Result.Stop) then
   begin
     if not CheckAssignCompatibility(Typ, Result.Start.Typ) then
@@ -6087,7 +6777,12 @@ begin
 end;
 
 procedure TParser.ParseFuncParamList(Parent: TSymbol; Params: TFuncParamList);
-
+{
+<ParmType>  ::= <TypeRef>
+            | ARRAY OF <TypeRef>
+            | ARRAY OF CONST
+            | FILE SynError
+}
   function ParseParamType(out ArgKind: TArgumentKind): TType;
   begin
     ArgKind := akNormal;
@@ -6151,6 +6846,7 @@ procedure TParser.ParseFuncParamList(Parent: TSymbol; Params: TFuncParamList);
     end;
     if M <> argDefault then
       NextToken;
+    // parse list
     Param := TFuncParam(ParseIdList(TFuncParam));
     Result := Param;
     if CurToken = tkColon then
@@ -6170,6 +6866,7 @@ procedure TParser.ParseFuncParamList(Parent: TSymbol; Params: TFuncParamList);
     HasVal := False;
     ValInit(DefValue);
     try
+      // parse default value
       if CurToken = tkEqual then
       begin
         NextToken;
@@ -6188,6 +6885,7 @@ procedure TParser.ParseFuncParamList(Parent: TSymbol; Params: TFuncParamList);
           ReleaseExpr(E);
         end;
       end;
+      // set Param info
       while Param <> nil do
       begin
         if HasVal then
@@ -6230,7 +6928,7 @@ begin
     EndToken := tkBraceClose
   else
     EndToken := tkSquaredBraceClose;
-  NextToken;
+  NextToken; // skip '('
   if CurToken <> EndToken then
   begin
     repeat
@@ -6270,6 +6968,7 @@ function TParser.ParseFunction(Parent: TSymbol): TSymbol;
 
     function SameParam(P1, P2: TFuncParam): boolean;
     begin
+      // todo 1: To compare function names
       Result := (P1.ParamType = P2.ParamType) and (P1.Modifier = P2.Modifier) and (P1.ArgKind = P2.ArgKind);
     end;
 
@@ -6299,7 +6998,24 @@ function TParser.ParseFunction(Parent: TSymbol): TSymbol;
     Result := ((F2.MethodKind = mkConstructor) or (F1.ReturnType = F2.ReturnType)) and
       SameParams and SameCallConv and (F2.ClassPrefix = (saClass in F1.Attr));
   end;
+  {  function FindProperDecl(Func: TFunctionDecl; Header: TFunctionHeader): TFunctionDecl;
+    begin
+      Result := Func;
+      while Result <> nil do
+      begin
+        if SameFuncDecl(Result, Header) then Exit;
+        Result := Result.NextOverload;
+      end;
+      if Result = nil then
+      begin
+        // If not found, use the first one so that the analysis can continue
+        ParseError('Declaration of %s differs from previous declaration', [Func.Name]);
+        Result := Func;
+      end;
+    end; }
 
+  // Find the declaration that matches the Header, and return true if found, Func is that function
+   // return false if not found, Func has not changed
   function FindProperDecl2(var Func: TFunctionDecl; Header: TFunctionHeader): boolean;
   var
     F: TFunctionDecl;
@@ -6324,6 +7040,7 @@ function TParser.ParseFunction(Parent: TSymbol): TSymbol;
     E := CurSymbols.Find(Header.Name);
     if (E <> nil) and (E.NodeKind in [nkFunc, nkExternalFunc]) then
     begin
+      // Find a suitable overload
       Func := TFunctionDecl(E);
       Result := FindProperDecl2(Func, Header);
     end
@@ -6340,6 +7057,7 @@ function TParser.ParseFunction(Parent: TSymbol): TSymbol;
     I: integer;
   begin
     E := FModule.FindSymbol(Header.Names[0]);
+    //    E := FindSymbol(FModule, Header.Names[0]);
     if E = nil then
       ParseError(SErr_UndeclaredIdent, [Header.Names[0]], True);
     if (E.NodeKind <> nkType) or not (TType(E).TypeCode in [typClass, typRecord, typObject]) then
@@ -6471,6 +7189,7 @@ function TParser.ParseFunction(Parent: TSymbol): TSymbol;
   begin
     if Owner = nil then
       Exit;
+    // The case of nested classes has been considered here
     if (Owner.NodeKind = nkType) then
     begin
       EnterClassScope(Owner.Parent);
@@ -6511,6 +7230,8 @@ function TParser.ParseFunction(Parent: TSymbol): TSymbol;
       begin
         if TFunction(sym).StartStmt = nil then
           ParseError(sym.Coord, SErr_FuncNotImpl, [sym.Name]);
+                (*if (faNeedFPArg in TFunction(sym).FuncAttr) {and (Func.Level > 0)} then
+          Include(Func.FuncAttr, faNeedFP);*)
       end;
     end;
   end;
@@ -6532,12 +7253,20 @@ begin
   ParseFunctionHeader(FHeader);
   StateRestore(StateInfo);
   FHeader.ClassPrefix := ClassPrefix;
+    // in class / object / record
+  // in interface section
+  // in implement section
   if FHeader.ImplementingName <> '' then
   begin
+    // is a method parsing statement
     Result := ToMethodResolution(FHeader, Parent);
     FHeader.Reset;
     Exit;
   end;
+  // todo 2: Where the function is implemented, the parameter list can be omitted.
+  //   Not if there is overload
+  // todo 2: The implementation here is the same as the $mode objpas of fpc, that is,
+  //   the implementation part cannot omit the parameters. It will be compatible with delphi in the future
   if Parent.NodeKind = nkType then
     ParentTyp := TType(Parent)
   else
@@ -6552,8 +7281,10 @@ begin
     if FHeader.MethodKind = mkConstructor then
       FHeader.ReturnType := TType(ParentTyp);
   end;
+  // find the declared
   if FCurStates * [psInClass, psInRecord, psInObject, psInIntf, psInDispIntf] <> [] then
   begin
+    // In the declaration part of class, record, object, interface, dispinterface
     NotAllowDotted;
     Func := FindExists(FHeader.Name);
     Result := ToMethod(FHeader);
@@ -6571,10 +7302,17 @@ begin
     begin
       AddSymbol(Result);
     end;
+    // Constructor/destructor will not be analyzed when analyzing interface/dispinterface
+  {  if (FHeader.MethodKind in [mkConstructor, mkDestructor])
+      and Assigned(ParentTyp) and not (ParentTyp.TypeCode in [typClass, typObject, typRecord]) then
+    begin
+      ParseError(Result.Coord, SErr_IntfNotAllowCtorDtor);
+    end;}
     Include(TFunctionDecl(Result).Modifiers, fmForward);
   end
   else if psInIntfSect in FCurStates then
   begin
+    // In the interface section, it can only be functions and procedures, not methods
     NotAllowDotted;
     Func := FindExists(FHeader.Name);
     Result := ToFunc(FHeader);
@@ -6595,11 +7333,14 @@ begin
   end
   else
   begin
+    // todo 2: It is necessary to consider that the method has been implemented,
+    // and the error code for another implementation
     Assert(psInImplSect in FCurStates);
     if FHeader.CountOfNames > 1 then
     begin
+      // method
       if FindMethodDecl(Func, FHeader) then
-        Result := Func
+        Result := Func  // todo 1: Consider that this Func has already been implemented
       else
       begin
         Result := ToMethod(FHeader);
@@ -6611,10 +7352,14 @@ begin
         end;
         ParseError('Method declaration not found', Func = nil);
       end;
+      // If there are multiple declarations, but none of them match, an error is reported,
+      // but a new method is created to continue the analysis
       Exclude(TFunctionDecl(Result).Modifiers, fmForward);
     end
     else
     begin
+      // If multiple declarations are found, but they do not meet, create a new function,
+      // This is a new function defined in the implementation section, not an error
       if FindFuncDecl(Func, FHeader) then
       begin
         Result := Func;
@@ -6623,6 +7368,7 @@ begin
       else
       begin
         Result := ToFunc(FHeader);
+        //  Result.IsInternal := True;
         if Func <> nil then
         begin
           if CheckOverloads(Func, TFunctionDecl(Result)) then
@@ -6640,6 +7386,7 @@ begin
     end;
   end;
   FHeader.Reset;
+  // todo 1: Overload needs to be checked here.
   if fmForward in TFunctionDecl(Result).Modifiers then
     Exit;
   if fmExternal in TFunctionDecl(Result).Modifiers then
@@ -6653,6 +7400,7 @@ begin
   StateSet(psInFunc, StateInfo);
   if (Result.NodeKind = nkMethod) then
     EnterClassScope(Result.Parent);
+  // local symbols
   EnterScope(TFunction(Result).LocalSymbols);
   if (Result.NodeKind = nkMethod) and Assigned(Result.Parent) and not
     (fmStatic in TFunctionDecl(Result).Modifiers) then
@@ -6704,7 +7452,10 @@ begin
 end;
 
 procedure TParser.ParseFunctionBlock(Func: TFunction);
+//var
+//  OldErr: Integer;
 begin
+  //  OldErr := FErrorCount;
   while True do
   begin
     case CurToken of
@@ -6724,14 +7475,18 @@ begin
         Break;
     end;
   end;
+  // Check the statement
   CheckFunction(Func);
+  // Generate code
+  //  if (Func.Level = 1) and (OldErr = FErrorCount) then
+  //    FContext.GenCode(Func);
 end;
 
 procedure TParser.ParseFunctionDirective(Result: TFunctionHeader);
 
   procedure ParseExternal;
   begin
-    NextToken;
+    NextToken; // skip 'external'
     if CurToken = tkSemicolon then
       Exit;
     if (CurToken = tkIdentifier) and SameText(CurTokenString, 'name') then
@@ -6742,17 +7497,18 @@ procedure TParser.ParseFunctionDirective(Result: TFunctionHeader);
     else
     begin
       Result.FileName := ParseStrExpr('1');
+      //      NextToken;
     end;
     if CurToken = tkSemicolon then
       Exit;
     if SameText(CurTokenString, 'name') then
     begin
-      NextToken;
+      NextToken;  // skip 'name'
       Result.RoutineName := ParseStrExpr('1');
     end
     else if SameText(CurTokenString, 'index') then
     begin
-      NextToken;
+      NextToken;  // skip 'index'
       Result.RoutineNo := ParseIntExpr;
     end
     else
@@ -6775,6 +7531,18 @@ procedure TParser.ParseFunctionDirective(Result: TFunctionHeader);
 var
   Directive: TDirectiveIdent;
 begin
+  {object pascal commands have a certain order, which can be separated by
+  semicolons or not. Regardless of the order here, semicolons are optional.
+
+  <CallDirectives>  ::= <CallDirective>
+                    | <CallDirectives> <CallDirective>
+
+  <CallDirective>   ::= register | pascal | cdecl | stdcall | safecall |
+                      inline | near | far | export | assmebler |
+                      local | varargs | overload |
+                      forward | external
+  }
+  // Instructions do not need to be used; separated from functions
   while True do
   begin
     if CurToken = tkSemicolon then
@@ -6789,6 +7557,7 @@ begin
     NextToken;
   end;
   Expect(tkSemicolon);
+    // analyse CallDirectives
   while True do
   begin
     if CurToken = tkSemicolon then
@@ -6799,7 +7568,7 @@ begin
       Break;
     Directive := FindDirective(CurTokenString);
     case Directive of
-      idExternal:
+      idExternal:  // external has to be the last one
       begin
         SetFlag(Result, Directive);
         ParseExternal;
@@ -6828,6 +7597,7 @@ begin
         SetFlag(Result, Directive);
         NextToken;
     end;
+    //    NextToken;
   end;
 end;
 
@@ -6838,7 +7608,7 @@ procedure TParser.ParseFunctionHeader(Result: TFunctionHeader);
     I: integer;
   begin
     I := 1;
-    NextToken;
+    NextToken; // skip '.'
     repeat
       Expect(tkIdentifier);
       with Func do
@@ -6861,6 +7631,17 @@ procedure TParser.ParseFunctionHeader(Result: TFunctionHeader);
 var
   IsProc: boolean;
 begin
+  {
+  <FunctionDecl>  ::= <FuncHeading>  <CallBody> <OptSemi>
+  <FuncHeading>   ::= FUNCTION  <RefId> <OptFormalParms> ':' <ResultType> <OptCallSpecifiers> ';'
+                  | FUNCTION  <RefId> ';'
+                  | <FuncHeading> <CallDirectives> <OptSemi>
+
+  <CallBody>    ::= <OptDeclSection> <CompoundStmt>
+                | <OptDeclSection> <AssemblerStmt>
+                | <ExternalDeclaration>
+                | FORWARD
+  }
   IsProc := CurToken <> tkFunction;
   if CurToken = tkConstructor then
     Result.MethodKind := mkConstructor
@@ -6868,7 +7649,7 @@ begin
     Result.MethodKind := mkDestructor
   else
     Result.MethodKind := mkNormal;
-  NextToken;
+  NextToken; // skip 'function' / 'procedure' / 'constructor' / 'destructor'
   Expect(tkIdentifier);
   Result.Name := CurTokenString;
   NextToken;
@@ -6890,12 +7671,14 @@ begin
   end;
   if not IsProc then
   begin
+    // parse return type
     Expect(tkColon);
     if CurToken = tkColon then
       NextToken;
     Result.ReturnType := ParseTypeRef;
   end;
   ParseFunctionDirective(Result);
+  // Convert dynamic to virtual
   if fmDynamic in Result.Modifiers then
   begin
     Exclude(Result.Modifiers, fmDynamic);
@@ -6908,7 +7691,7 @@ var
   E: TSymbol;
 begin
   Result := TGotoStmt(CreateStmt(TGotoStmt));
-  NextToken;
+  NextToken;  // skip 'goto';
   if CurToken in [tkIdentifier, tkIntConst] then
   begin
     E := FindSymbol(CurTokenString);
@@ -6919,6 +7702,7 @@ begin
     else
       Result.StmtLabel := TStmtLabel(E);
     NextToken;
+    //  Expect(tkSemicolon);
   end
   else
     Expect(tkIdentifier);
@@ -6928,6 +7712,7 @@ function TParser.ParseHints: TMemberHints;
 var
   S: string;
 begin
+  // Cur is tkIdentifier
   Result := [];
   repeat
     if CurToken = tkIdentifier then
@@ -6956,6 +7741,7 @@ function TParser.ParseIdList(SymClass: TSymbolClass): TSymbol;
 var
   E1, E2: TSymbol;
 begin
+  // cur token must be tkIdentifier
   Result := nil;
   E2 := nil;
   repeat
@@ -6977,7 +7763,7 @@ end;
 
 function TParser.ParseIfStmt: TIfStmt;
 begin
-  NextToken;
+  NextToken;  // skip if
   Result := TIfStmt(CreateStmt(TIfStmt));
   Result.Value := ParseExpr;
   CheckBoolExpr(Result.Value);
@@ -7038,9 +7824,12 @@ procedure TParser.ParseImplementSection;
   end;
 
 begin
+  {
+  <ImplementationSection> ::= IMPLEMENTATION <OptUsesSection> <OptDeclSection> <OptExportBlock>
+  }
   FCurStates := [psInImplSect];
   FInternalSection := True;
-  NextToken;
+  NextToken;   // skip 'implementation'
   if CurToken = tkUses then
     ParseUsesClause;
   while True do
@@ -7091,6 +7880,7 @@ begin
     Expect(tkEnd);
     NextToken;
   end;
+  // Create a blank initialization/finalization function
   if FModule.InitializeFunc = nil then
     FModule.InitializeFunc := CreateEmptyFunc('$init');
   if FModule.FinalizeFunc = nil then
@@ -7100,8 +7890,11 @@ end;
 
 procedure TParser.ParseInterfaceSection;
 begin
+  {
+  <InterfaceSection>	::= INTERFACE <OptUsesSection> <OptExportDeclList>
+  }
   FCurStates := [psInIntfSect];
-  NextToken;
+  NextToken; // skip 'interface'
   if CurToken = tkUses then
     ParseUsesClause;
   while True do
@@ -7114,7 +7907,7 @@ begin
       tkProcedure, tkFunction: Self.ParseFunction(FModule);
       tkLabel:
       begin
-        ParseError('Label declaration not allowed in interface part');
+        ParseError('Label declaration not allowed in interface part'); //Self.ParseLabelSection(FModule);
         Self.ParseLabelSection(FModule);
       end;
       else
@@ -7185,10 +7978,10 @@ begin
     Result.IsDisp := CurToken = tkDispInterface;
     NotAddSym := False;
   end;
-  NextToken;
+  NextToken;  // skip 'interface'
   OldErr := FErrorCount;
   if CurToken = tkSemicolon then
-  begin
+  begin  // forward
     Include(Result.Attr, saForward);
     Exit;
   end;
@@ -7198,6 +7991,7 @@ begin
     StateSet(psInIntf, State);
   if CurToken = tkBraceOpen then
   begin
+    // parse base
     NextToken;
     Typ := ParseTypeRef;
     Typ := Typ.OriginalType;
@@ -7208,6 +8002,7 @@ begin
     Expect(tkBraceClose);
     NextToken;
   end;
+  // The dispinterface base class is idispinterface
   if Result.Base = nil then
   begin
     if Result.IsDisp then
@@ -7215,6 +8010,7 @@ begin
     else
       Result.Base := FContext.FIUnknownType;
   end;
+  // The dispinterface must have a GUID, but the interface does not have to be a GUID
   if CurToken = tkSquaredBraceOpen then
   begin
     NextToken;
@@ -7352,6 +8148,9 @@ function TParser.ParseIntfProperty(Parent: TType): TIntfProperty;
       ParseError(Prop.Coord, SErr_AccessorMethodArgsNotMatched)
     else
     begin
+      { Setter:
+        procedure SetValue(i: Integer; value: Double);
+      }
       for I := 0 to Prop.ParamCount - 1 do
       begin
         A1 := Prop.Params[I];
@@ -7431,6 +8230,21 @@ var
   PropD: TPropDirective;
   OldErr: integer;
 begin
+{
+<PropertySpec>		::= PROPERTY <PropertyDecl> <OptPropSpecifiers> ';'
+
+<PropertyDecl>		::= <RefId>                     ':' <TypeRef>
+			  | <RefId> '[' <IndexList> ']' ':' <TypeRef>
+			  | <RefId>
+<PropertySpecifiers>	::= <PropertySpecifier>
+			  | <PropertySpecifiers>  <PropertySpecifier>
+
+<PropertySpecifier>	::= READ       <FieldDesignator>
+			  | WRITE      <FieldDesignator>
+			  | WRITEONLY
+			  | READONLY
+			  | DISPID <ConstIntExpr>        !Only within InterfaceTypes
+}
   NextToken;
   Expect(tkIdentifier);
   Result := TIntfProperty(CreateElement(TIntfProperty));
@@ -7440,6 +8254,7 @@ begin
   if CurToken = tkSquaredBraceOpen then
   begin
     NextToken;
+    // parse array property args
     Result.CreateParams;
     Self.ParseFuncParamList(Result, Result.Params);
     Expect(tkColon);
@@ -7475,6 +8290,7 @@ begin
   NextToken;
   if CurToken = tkIdentifier then
   begin
+    // Only the Array property requires the default directive
     if SameText(CurTokenString, 'default') then
       Include(Result.PropAttr, ipaDefaultProp);
     NextToken;
@@ -7489,6 +8305,16 @@ function TParser.ParseLabeledStmt(const S: string): TStatement;
 var
   Lab: TSymbol;
 begin
+  // todo 1: Consider the situation
+  {
+    if Value then
+  L1:
+      DoSome
+    else
+      DoOther;
+
+    At this time, it cannot be analyzed normally
+  }
   Lab := FindSymbol(FTemp);
   if Lab = nil then
     ParseError(SErr_UndeclaredIdent)
@@ -7511,7 +8337,7 @@ procedure TParser.ParseLabelSection(Parent: TSymbol);
 var
   Lab: TStmtLabel;
 begin
-  NextToken;
+  NextToken; // skip 'label'
   Lab := TStmtLabel(ParseIdList(TStmtLabel));
   while
     Lab <> nil do
@@ -7555,7 +8381,7 @@ begin
           ValFromRawStr(V, S);
       end;
     end;
-    else
+    else  // float
       ValFromReal(V, FScanner.TokenValue.RealValue);
   end;
   Result := CreateConstExpr(opCONST);
@@ -7584,6 +8410,10 @@ var
   left, right: TExpr;
   op: TExprOpCode;
 begin
+{
+<MulExpr>		::= <Factor>
+			  | <MulExpr> <MulOp> <Factor>
+}
   Result := ParseFactor;
   op := MulOp(CurToken);
   while op <> opNONE do
@@ -7597,7 +8427,7 @@ begin
 end;
 
 function TParser.ParseObjectType(const ObjName: string): TObjectType;
-
+// todo 1: To be perfected
   procedure CheckObject(typ: TObjectType);
   var
     i: integer;
@@ -7608,7 +8438,7 @@ function TParser.ParseObjectType(const ObjName: string): TObjectType;
       sym := typ.Symbols[i];
       case sym.NodeKind
         of
-        nkMethod: if fmOverride in TMethod(Sym).Modifiers then
+        nkMethod: if fmOverride in TMethod(Sym).Modifiers then  // Check if it's override;
             Include(TMethod(Sym).Modifiers, fmVirtual);
       end;
     end;
@@ -7627,9 +8457,10 @@ var
 begin
   Result := TObjectType(CreateElement(TObjectType));
   StateSet(psInObject, StateInfo);
-  NextToken;
+  NextToken;  // skip 'object'
   if CurToken = tkBraceOpen then
   begin
+    // parse base
     NextToken;
     Base := ParseQualifiedSym;
     if (Base.NodeKind <> nkType) or (TType(Base).TypeCode <> typObject) then
@@ -7752,6 +8583,7 @@ begin
   LeaveScope;
   FCurParent := OldParent;
   FCurVisibility := OldVis;
+  // Check the Symbols
   if FErrorCount = OldErr then
     CheckObject(Result);
   if FErrorCount = OldErr then
@@ -7762,7 +8594,7 @@ function TParser.ParseProgram: TModule;
 
   procedure SkipArgs;
   begin
-    NextToken;
+    NextToken; // skip '('
     while
       True do
     begin
@@ -7772,11 +8604,11 @@ function TParser.ParseProgram: TModule;
         Break;
       NextToken;
     end;
-    NextToken;
+    NextToken; // skip ')'
     Expect(tkSemicolon);
   end;
 
-  procedure CleanupSym;
+  procedure CleanupSym;   //   <====   HERE
   var
     st: TSymbolTable;
   begin
@@ -7786,7 +8618,11 @@ function TParser.ParseProgram: TModule;
   end;
 
 begin
-  NextToken;
+{
+<ProgHeader>		::= PROGRAM <RefId> <OptProgParamList> ';'
+<OptProgParamList>	::= '(' <IdList> ')'
+}
+  NextToken; // skip 'program'
   Expect(tkIdentifier, True);
   FModule := TModule(CreateElement(TModule));
   FModule.Name := CurTokenString;
@@ -7796,9 +8632,8 @@ begin
   if CurToken = tkBraceOpen then
     SkipArgs
   else
-    Expect(
-      tkSemicolon, True);
-  NextToken;
+    Expect(tkSemicolon, True);
+  NextToken; // skip ';'
   EnterScope(FModule.Symbols);
   FContext.LoadSystemUnit;
   FModule.Symbols.AutoAddToOwner := False;
@@ -7806,6 +8641,7 @@ begin
   FModule.Symbols.AutoAddToOwner := True;
   FModule.LoadedUnits.Add(FContext.FSystemUnit);
   FCurParent := FModule;
+  //SetTempExpr(True);
   FInternalSection := True;
   FCurStates := [psInImplSect];
   if CurToken = tkUses then
@@ -7814,13 +8650,15 @@ begin
   FCurParent := nil;
   LeaveScope;
   FCurStates := [];
+  // Check that all declarations are implemented
   CheckForward;
   CleanupSym;
   Result := FModule;
 end;
 
 function TParser.ParseProperty(Parent: TType; IsStatic: boolean): TProperty;
-
+// Check the validity of Expr, if it is invalid, return false, and the error message is sent through ParseError
+// Returns true
   function IsMemberExpr(E: TExpr): boolean;
   var
     Elem: TSymbol;
@@ -7840,6 +8678,7 @@ function TParser.ParseProperty(Parent: TType; IsStatic: boolean): TProperty;
         ParseError('%s must be a field or method of %s', [Elem.Name, Parent.Name]);
       Exit;
     end;
+    // It can be a field in a record, but it's not accessible by pointers
     while E <> nil do
     begin
       if E.OpCode = opMEMBER then
@@ -7860,7 +8699,7 @@ function TParser.ParseProperty(Parent: TType; IsStatic: boolean): TProperty;
       else if E.OpCode = opSYMBOL then
         Break
       else
-        Exit;
+        Exit;  // invalid operator
     end;
     Elem := TSymbolExpr(E).reference;
     if Elem.NodeKind <> nkField then
@@ -7897,6 +8736,7 @@ function TParser.ParseProperty(Parent: TType; IsStatic: boolean): TProperty;
   var
     E: TExpr;
   begin
+    // CurToken is tkIdentifier
     E := CreateSymbolExpr(CurTokenString);
     NextToken;
     while CurToken = tkDot do
@@ -7926,6 +8766,7 @@ function TParser.ParseProperty(Parent: TType; IsStatic: boolean): TProperty;
     E: TExpr;
   begin
     Result := nil;
+    // todo 1: Constants may not be analyzed with Checkexpr here
     E := ParseConstExpr;
     if CheckExpr(E) then
     begin
@@ -7954,6 +8795,7 @@ function TParser.ParseProperty(Parent: TType; IsStatic: boolean): TProperty;
       t1 := TSubrangeType(t1).BaseType;
     if t2.TypeCode = typSubrange then
       t2 := TSubrangeType(t2).BaseType;
+    //  Result := t1 = t2;
     Result := t1.Equals(t2);
   end;
 
@@ -8064,8 +8906,10 @@ function TParser.ParseProperty(Parent: TType; IsStatic: boolean): TProperty;
     end
     else
     begin
-      for I := 0
-        to Prop.ParamCount - 1 do
+      { Setter:
+        procedure SetValue(i: Integer; value: Double);
+      }
+      for I := 0 to Prop.ParamCount - 1 do
       begin
         A1 := Prop.Params[I];
         A2 := MethodArgs[I];
@@ -8132,10 +8976,19 @@ function TParser.ParseProperty(Parent: TType; IsStatic: boolean): TProperty;
     end;
   end;
 
-  procedure CheckProp(Prop: TProperty);
+  procedure CheckProp(Prop: TProperty);   //   <====   HERE
   var
     OldErr: integer;
   begin
+    // 1. Check the type
+    // 2. Check the parameters
+    // 3. There is an index, the Accessor cannot be a field, and the attribute cannot be an Array
+    // 4. The Accessor of class property must be class var or class method
+    // 5. Getter and setter must have a non-nil
+    // 6.Array property can have default
+
+    // todo 2: getter/setter/stored requires ccDefault
+
     if Prop.HasIndexSpec and (Prop.ParamCount > 0) then
       ParseError(Prop.Coord, 'Array property not allow index directive')
     else if (saStatic in Prop.Attr) and (Prop.Stored <> nil) then
@@ -8196,6 +9049,13 @@ var
   PropD: TPropDirective;
   OldErr: integer;
 begin
+  {
+  <PropertySpec>		::= PROPERTY <PropertyDecl> <OptPropSpecifiers> ';'
+
+  <PropertyDecl>		::= <RefId>                     ':' <TypeRef>
+  			  | <RefId> '[' <IndexList> ']' ':' <TypeRef>
+  			  | <RefId>
+  }
   NextToken;
   Expect(tkIdentifier);
   Result := TProperty(CreateElement(TProperty));
@@ -8204,6 +9064,8 @@ begin
   FullDecl := False;
   if CurToken = tkSquaredBraceOpen then
   begin
+    //    NextToken;
+        // parse array property args
     Result.CreateParams;
     Self.ParseFuncParamList(Result, Result.Params);
     Expect(tkColon);
@@ -8218,6 +9080,7 @@ begin
   OldErr := Self.ErrorCount;
   while CurToken = tkIdentifier do
   begin
+    // todo 5: This is where you can optimize. Added an option to consider Read and the like as keywords in Scanner
     PropD := ParsePropDirective(CurTokenString);
     NextToken;
     case PropD of
@@ -8233,7 +9096,7 @@ begin
   end;
   Expect(tkSemicolon);
   NextToken;
-  if CurToken = tkIdentifier then
+  if CurToken = tkIdentifier then  // Only the Array property requires the default directive
     if SameText(CurTokenString, 'default') then
     begin
       Include(Result.PropAttr, paDefaultProp);
@@ -8246,8 +9109,9 @@ begin
     Include(Result.Attr, saStatic);
     Include(Result.Attr, saClass);
   end;
-  if not FullDecl then
+  if not FullDecl then  // It's not a complete declaration, and you need to look up the base class declaration to refine it
     FindBaseDecl(Result);
+  // If an error has already occurred above, you don't need to check
   if OldErr = Self.ErrorCount then
     CheckProp(Result);
 end;
@@ -8263,8 +9127,10 @@ begin
   else
     FQId.Name := First;
   FQId.CountOfNames := 1;
-  while CurToken = tkDot do
+  while CurToken = tkDot do  // System.SysUtils.Id This is the case
   begin
+    // Allow reserved words to appear in tkDot(.) afterwards
+    // For example, MyUnit.Type
     Scanner.NoReservedWord := True;
     NextToken;
     Scanner.NoReservedWord := False;
@@ -8278,7 +9144,7 @@ begin
   FQId.Names[0] := FQId.Name;
 end;
 
-function TParser.ParseQualifiedSym(const First: string): TSymbol;
+function TParser.ParseQualifiedSym(const First: string): TSymbol;   //   <====   HERE
 var
   Sym: TSymbol;
   I: integer;
@@ -8317,8 +9183,10 @@ end;
 
 function TParser.ParseRaiseStmt: TRaiseStmt;
 begin
+  // raise object_expression
+  // raise object_expression at pointer_expression
   Result := TRaiseStmt(CreateStmt(TRaiseStmt));
-  NextToken;
+  NextToken; // skip 'raise'
   if (CurToken in [tkSemicolon, tkEnd, tkElse]) then
     Exit;
   Result.Expr := Self.ParseDesignator;
@@ -8346,13 +9214,15 @@ function TParser.ParseRecordType(const TypName: string; Parent: TSymbol): TRecor
     begin
       if CurToken = tkCase then
       begin
-        NextToken;
+        NextToken; // skip 'case'
         Expect(tkIdentifier);
         FTemp := CurTokenString;
         Result.Selector := TField(CreateElement(TField));
         NextToken;
         if CurToken = tkColon then
         begin
+          // TODO: 2 This part has not been tested yet
+          // The previous one was the Selector Field Name
           Result.Selector.Name := FTemp;
           FTemp := '';
           NextToken;
@@ -8368,12 +9238,14 @@ function TParser.ParseRecordType(const TypName: string; Parent: TSymbol): TRecor
         B1 := nil;
         repeat
           E := ParseExprList;
+          // todo 5: Need to check for E-type compatibility
           CheckSelector(E, Result.Selector.FieldType);
           ReleaseExpr(E);
           Expect(tkColon);
           NextToken;
           Expect(tkBraceOpen);
           NextToken;
+          //B2 := TRecordVariant(ParseRecordBody(TRecordVariant));
           ParseRecordBody(TRecordVariant, TRecordBody(B2));
           if Result.Variants = nil then
             Result.Variants := B2;
@@ -8412,7 +9284,7 @@ function TParser.ParseRecordType(const TypName: string; Parent: TSymbol): TRecor
 var
   OldParent: TSymbol;
 begin
-  NextToken;
+  NextToken; // skip 'record'
   Result := TRecordType(CreateElement(TRecordType));
   Result.Name := TypName;
   if Result.Name <> '' then
@@ -8422,6 +9294,7 @@ begin
   EnterScope(Result.Symbols);
   OldParent := FCurParent;
   FCurParent := Parent;
+  //Result.Body :=
   ParseRecordBody(TRecordBody, Result.Body);
   Expect(tkEnd);
   NextToken;
@@ -8433,13 +9306,15 @@ begin
   if psInPacked in FCurStates then
     Result.GlobalAlignSize := 1;
   Result.Update;
+  {  if Result.Size > $7fffffff then
+      ParseError(Result.Coord, 'Type size may be exceed than 2GB');}
 end;
 
 function TParser.ParseRepeatStmt: TRepeatStmt;
 var
   StateInfo: TParseStateInfo;
 begin
-  NextToken;
+  NextToken; // skip 'repeat'
   StateSet(psInWhileStmt, StateInfo);
   Result := TRepeatStmt(CreateStmt(TRepeatStmt));
   Result.Stmt := ParseStmtList(Result, [tkUntil]);
@@ -8448,13 +9323,16 @@ begin
   NextToken;
   Result.Condition := ParseExpr;
   CheckBoolExpr(Result.Condition);
+  //  Expect(tkDo);
+  //  NextToken;
+  //  Result.Stmt := ParseStatement(Result);
 end;
 
 procedure TParser.ParseResStringSection(Parent: TSymbol);
 var
   V: TConstant;
 begin
-  NextToken;
+  NextToken; // skip 'resourcestring'
   Expect(tkIdentifier);
   repeat
     V := TConstant(CreateElement(TConstant));
@@ -8505,6 +9383,7 @@ function TParser.ParseSetElementList: TExpr;
 var
   L: TExpr;
 begin
+  // To read the SET expression list, the number must be >=1
   Result := CreateListExpr;
   L := ParseSetElement;
   TListExpr(Result).Add(L);
@@ -8578,12 +9457,19 @@ function TParser.ParseSimpleStmt: TStatement;
     end;
   end;
 
+  // Check if it can be used as an lvalue
   function CheckLValue(L: TExpr): boolean;
 
     function IsSizeEqual(E: TExpr): boolean;
     var
       Left, R: TExpr;
     begin
+      // Check when the lvalue is a Cast:
+      // Integer(P^) := 4;
+      // Word(pWide^) := 0;
+
+      // E is TBinaryExpr with opCAST
+      // E.Right is opLIST
       R := TBinaryExpr(E).Right;
       Left := TBinaryExpr(E).Left;
       if R.Typ.TypeCode = typUntype then
@@ -8595,6 +9481,16 @@ function TParser.ParseSimpleStmt: TStatement;
   var
     Ref: TSymbol;
   begin
+    // Must point to a memory address
+    {
+      var p: pchar;
+      p := nil;
+      p^ := a;
+      (p + 1)^ := #0;
+      @procvar := nil;
+      arr[5] := 1;
+      Integer(p^) := 5;
+    }
     case L.OpCode of
       opMEMBER:
       begin
@@ -8606,9 +9502,23 @@ function TParser.ParseSimpleStmt: TStatement;
         Ref := TSymbolExpr(L).reference;
         Result := SymbolCanAssignTo(Ref);
       end;
-      opINDEX: Result := True;
+      opINDEX: Result := True;  // todo 1: There's a problem here, array property
+      { case:
+        Item[0][1] := 'd'; // Item[0] return TStrings, pchar, this ok
+        Item[0][1] := 'd'; // Item[0] return string, this not ok
+        p^[1] := 'd';      // p^ is tstrings, pchar, etc. this ok
+        arrprop[1] := 'd'; // arrprop is readonly property, this not ok
+      }
+      { opINDEX: begin
+        if TBinaryExpr(L).Left.OpCode = opMEMBER then
+        begin
+          Ref := TBinaryExpr(L).Left.GetReference;
+          Result := SymbolCanAssignTo(Ref);
+        end else
+          Result := True;
+      end;}
       opINST: Result := L.Typ.TypeCode <> typUntype;
-      opCAST: Result := IsSizeEqual(L);
+      opCAST: Result := IsSizeEqual(L);   // todo 2: Probably not required
       opADDR: Result := TUnaryExpr(L).Operand.Typ.TypeCode = typProcedural;
       else
         Result :=
@@ -8625,6 +9535,7 @@ function TParser.ParseSimpleStmt: TStatement;
 
   function CheckRExpr(L: TExpr; var R: TExpr): boolean;
   begin
+    // Handled: Assign a function to a function variable
     FExpectedProcType := L.Typ.TypeCode = typProcedural;
     Result := CheckExpr(R);
     FExpectedProcType := False;
@@ -8634,14 +9545,36 @@ function TParser.ParseSimpleStmt: TStatement;
   begin
     if not CanAssign(L.Typ, R) then
       ParseError(L.Coord, SErr_IncompatibleTypes);
+{   if (L.Typ.TypeCode = typClassRef) and (R.Typ.TypeCode = typClass) then
+      if not R.IsTypeSymbol then
+      begin
+        ParseError(L.Coord, SErr_IncompatibleTypes);
+        Exit;
+      end;
+
+    if R.IsNilConst and (L.Typ.TypeCode in [typPointer, typClass,
+        typClassRef, typPAnsiChar, typPWideChar, typDynamicArray,
+        typInterface]) then
+    begin
+      Exit;
+    end;
+
+    // case: R is string constant, L is PAnsiChar,PWideChar,PackedString
+    if R.IsStringConstant and (L.Typ.IsStringArithCompatible) then
+      Exit;
+
+    if not CheckAssignCompatibility(L.Typ, R.Typ) then
+      ParseError(L.Coord, SErr_IncompatibleTypes);}
   end;
 
   procedure ProcessDelayed(L, R: TExpr);
   begin
+    // Case: p:= @proc; proc is an overloaded function, and CheckExpr cannot determine which overload is required for proc
     if R.OpCode <> opADDR then
       InternalError('Expect opADDR in ProcessDelayed');
     if R.Typ.TypeCode <> typProcedural then
       InternalError('Expect procedural type in ProcessDelayed');
+    // The overloaded function can be assigned to the Pointer type, taking the first function
     if L.Typ.IsUntypePointer then
       Exit;
     if L.Typ.TypeCode <> typProcedural then
@@ -8652,13 +9585,14 @@ function TParser.ParseSimpleStmt: TStatement;
 
 var
   L, R: TExpr;
+//  AsgStmt: TAssignmentStmt;
 begin
   if CurToken in [tkIdentifier, tkIntConst, tkAt, tkInherited] then
   begin
     FTemp := CurTokenString;
     NextToken;
     if CurToken = tkColon then
-    begin
+    begin  // (tr. (grade?) (label?)
       Result := ParseLabeledStmt(FTemp);
       FTemp := '';
     end
@@ -8669,17 +9603,23 @@ begin
         L := ParseFactor
       else
         L := ParseDesignator;
+      // / In this case: @proc := GetProcAddress
       if L.OpCode = opADDR then
         Expect(tkAssign);
       Result := nil;
       if CurToken = tkAssign then
       begin
         NextToken;
+        {AsgStmt := TAssignmentStmt(CreateStmt(TAssignmentStmt));
+        Result := AsgStmt;
+        AsgStmt.Left := L;
+        AsgStmt.Right := ParseExpr;}
         R := ParseExpr;
         if CheckLExpr(L) and CheckRExpr(L, R) then
         begin
           if not CheckLValue(L) then
             ParseError(L.Coord, SErr_NotAssign);
+          // Check the rvalue
           if R.Typ.TypeCode = typUntype then
             ParseError(SErr_ExprNoValue)
           else
@@ -8700,9 +9640,11 @@ begin
       end
       else
       begin
+        // call stmt
         Result := CreateStmt(TCallStmt);
         if CheckExpr(L) then
           if not (L.OpCode in [opCALL]) then
+            // todo 1: (seems to have been solved) There is a problem with obj.show and the like
             ParseError('Call statement expected');
         TCallStmt(Result).CallExpr := L;
       end;
@@ -8721,6 +9663,7 @@ label
   Start;
 begin
   Start:
+  // SetTempExpr(False);
     case CurToken of
       tkAsm:
       begin
@@ -8739,24 +9682,28 @@ begin
       tkBegin: Result := ParseCompoundStmt;
       tkElse: Result := nil;
       tkEnd: Result := nil;
+      //    tkOn: Expect(tkIdentifier);
       tkSemicolon:
       begin
         while
         CurToken = tkSemicolon do
           NextToken;
         Result := nil;
+        //Goto Start;
       end;
       else
         Result := ParseSimpleStmt;
     end;
   if Result <> nil then
     Result.Parent := Parent;
+  // SetTempExpr(True);
 end;
 
 function TParser.ParseStmtList(Parent: TStatement; EndTokens: TTokens): TCompoundStmt;
 var
   Stmt: TStatement;
 begin
+  // Similar to ParseCompoundStmt, but without begin and end.
   Result := TCompoundStmt(CreateStmt(TCompoundStmt));
   Result.Parent := Parent;
   while not (CurToken in EndTokens) do
@@ -8802,7 +9749,7 @@ function TParser.ParseTryStmt: TTryStmt;
     Handler: TExceptHandler;
     Sym: TSymbol;
   begin
-    NextToken;
+    NextToken;   // skip 'except'
     Result := TExceptBlock.Create;
     TryStmt.ExceptBlock := Result;
     if IsOn then
@@ -8811,20 +9758,23 @@ function TParser.ParseTryStmt: TTryStmt;
       begin
         if IsOn then
         begin
-          NextToken;
+          NextToken;   // skip 'on'
           Handler := TExceptHandler.Create;
           Handler.ExceptVar := TVariable(CreateElement(TVariable));
           Result.AddExceptHandler(Handler);
+          // parse except var
           Expect(tkIdentifier);
           FTemp := CurTokenString;
           NextToken;
           if CurToken = tkColon then
           begin
-            NextToken;
+            // case 1, on E: Exception do
+            NextToken; // skip ':'
             Handler.ExceptVar.Name := FTemp;
             FTemp := '';
           end;
           Include(Handler.ExceptVar.VarAttr, vaLocal);
+          // case 2, on Exception do
           Sym := ParseQualifiedSym(FTemp);
           if Sym = nil then
             ParseError(SErr_UndeclaredIdent, [FQID.Id]);
@@ -8844,6 +9794,8 @@ function TParser.ParseTryStmt: TTryStmt;
             Self.CurSymbols.Remove(Handler.ExceptVar.Name);
           if CurToken = tkSemicolon then
             NextToken;
+//          while CurToken = tkSemicolon do
+//            NextToken;
         end
         else if CurToken = tkElse then
         begin
@@ -8855,12 +9807,12 @@ function TParser.ParseTryStmt: TTryStmt;
           Break;
       end;
     end
-    else
+    else // case 3, try dosome; except end;
       Result.Default := ParseStmtList(TryStmt, [tkEnd]);
   end;
 
 begin
-  NextToken;
+  NextToken; // skip 'try'
   Result := TTryStmt(CreateStmt(TTryStmt));
   Result.Stmt := ParseStmtList(Result, [tkFinally, tkExcept]);
   if CurToken = tkFinally then
@@ -8885,7 +9837,8 @@ function TParser.ParseTypeDecl(const TypName: string; Parent: TSymbol): TType;
     Value :=
       0;
     E := nil;
-    NextToken;
+    //  SetTempExpr(True);
+    NextToken; // skip '('
     repeat
       Expect(tkIdentifier);
       if CurToken = tkIdentifier then
@@ -8920,6 +9873,7 @@ function TParser.ParseTypeDecl(const TypName: string; Parent: TSymbol): TType;
       Expect(tkComma);
       NextToken;
     until False;
+    //   ClearTempExprList;
     Expect(tkBraceClose);
     NextToken;
   end;
@@ -8941,6 +9895,7 @@ function TParser.ParseTypeDecl(const TypName: string; Parent: TSymbol): TType;
 
   function CanDelayDecl(Qd: TQualifiedId): boolean;
   begin
+    // Without any qualification, the declaration can be deferred
     Result := Qd.CountOfNames = 1;
   end;
 
@@ -9006,11 +9961,15 @@ function TParser.ParseTypeDecl(const TypName: string; Parent: TSymbol): TType;
     Result := True;
   end;
 
+  // Analyze two scenarios:
+  // MyT = Vcl.TRect;
+  // MyT = 1+2..5*6;
   function ParseType(Alias: boolean): TType;
   var
     L, R: TExpr;
     LVal, RVal: TValueRec;
   begin
+    // todo 1: Note if ttt = aa.bb is supported
     R := nil;
     L := ParseTypeExpr;
     if CurToken = tkDotDot then
@@ -9067,6 +10026,12 @@ function TParser.ParseTypeDecl(const TypName: string; Parent: TSymbol): TType;
       ReleaseExpr(R);
   end;
 
+{
+<CallType> ::= PROCEDURE <OptFormalParms> <OptCallConventions>
+      | PROCEDURE   <OptFormalParms>                  OF OBJECT <OptCallConventions>
+      | FUNCTION    <OptFormalParms> ':' <ResultType>           <OptCallConventions>
+      | FUNCTION    <OptFormalParms> ':' <ResultType> OF OBJECT <OptCallConventions>
+}
   function ParseProceduralType: TProceduralType;
 
     function EndOfDecl: boolean;
@@ -9083,7 +10048,7 @@ function TParser.ParseTypeDecl(const TypName: string; Parent: TSymbol): TType;
     M: TFunctionModifier;
   begin
     IsFunc := CurToken = tkFunction;
-    NextToken;
+    NextToken; // skip 'function'/'procedure'
     Result := TProceduralType(CreateType(TProceduralType));
     if CurToken = tkBraceOpen then
     begin
@@ -9092,6 +10057,7 @@ function TParser.ParseTypeDecl(const TypName: string; Parent: TSymbol): TType;
     end;
     if IsFunc then
     begin
+      // parse return type
       Expect(tkColon);
       if CurToken = tkColon then
         NextToken;
@@ -9110,6 +10076,7 @@ function TParser.ParseTypeDecl(const TypName: string; Parent: TSymbol): TType;
       NextToken;
     if (CurToken = tkIdentifier) and IsCallConv(CurTokenString, cc) then
     begin
+      // Analyze the instruction up to '; '
       Result.CallConvention := cc;
       NextToken;
       while not EndOfDecl do
@@ -9117,7 +10084,7 @@ function TParser.ParseTypeDecl(const TypName: string; Parent: TSymbol): TType;
         Expect(tkIdentifier);
         if IsCallConv(CurTokenString, cc) then
           Result.CallConvention := cc
-        else if IsModifier(CurTokenString, M) then
+        else if IsModifier(CurTokenString, M) then // ignore
         else
           ParseError('Invalid procedural directive %s', [CurTokenString]);
         NextToken;
@@ -9132,8 +10099,8 @@ function TParser.ParseTypeDecl(const TypName: string; Parent: TSymbol): TType;
     IsDyn: boolean;
     A1, LastArr: TArrayType;
     Typ: TType;
-  begin
-    NextToken;
+  begin;
+    NextToken; // skip 'array'
     LastArr :=
       nil;
     if CurToken = tkSquaredBraceOpen then
@@ -9180,6 +10147,7 @@ function TParser.ParseTypeDecl(const TypName: string; Parent: TSymbol): TType;
       TDynamicArrayType(Result).ElementType := Typ
     else
       LastArr.ElementType := Typ;
+    //  TArrayType(Result).ElementType := Typ;
     if psInPacked in FCurStates then
       TArrayType(Result).IsPacked := True;
     if IsDyn then
@@ -9193,7 +10161,7 @@ function TParser.ParseTypeDecl(const TypName: string; Parent: TSymbol): TType;
     T: TType;
     RangeType: TSubrangeType;
   begin
-    NextToken;
+    NextToken; // skip 'set'
     Expect(tkOf);
     NextToken;
     T := ParseType(False);
@@ -9218,6 +10186,7 @@ function TParser.ParseTypeDecl(const TypName: string; Parent: TSymbol): TType;
     end;
   end;
 
+  // Returns true, the type is acceptable
   function CheckFileType(Typ: TType): boolean;
   var
     I: integer;
@@ -9249,7 +10218,7 @@ function TParser.ParseTypeDecl(const TypName: string; Parent: TSymbol): TType;
   var
     Typ: TType;
   begin
-    NextToken;
+    NextToken; // skip 'file'
     if CurToken = tkOf then
     begin
       NextToken;
@@ -9298,30 +10267,35 @@ function TParser.ParseTypeDecl(const TypName: string; Parent: TSymbol): TType;
   end;
 
 begin
+  {
+  <TypeDecl>		::= <TypeId> '=' <TypeSpec>
+  			  | SynError ';'
+  }
+  // Analyze the type until '; 'or'=' appears
   case CurToken of
     tkBraceOpen:
-    begin
+    begin // enum
       Result := CreateType(TEnumType);
       ParseEnumType(TEnumType(Result));
       TEnumType(Result).MinEnumSize := FMinEnumSize;
       TEnumType(Result).Update;
     end;
     tkCaret:
-    begin
+    begin // pointer
       NextToken;
       Expect(tkIdentifier);
       Result := ParsePointerType;
     end;
     tkIdentifier, tkIntConst, tkHexConst, tkCharConst, tkStrConst: Result := ParseType(not (psInVar in FCurStates));
     tkType:
-    begin
+    begin // My = type Byte;
       if (psInVar in FCurStates) or (psInField in FCurStates) then
         Expect(tkIdentifier);
       NextToken;
       if CurToken <> tkString then
         Expect(
           tkIdentifier);
-      Result := ParseTypeName(True);
+      Result := ParseTypeName(True); // You can use parseQSym
     end;
     tkProcedure: Result := ParseProceduralType;
     tkFunction: Result := ParseProceduralType;
@@ -9362,6 +10336,12 @@ function TParser.ParseTypeExpr: TExpr;
 var
   S1: TParseStateInfo;
 begin
+  // Analyze type expressions
+  {
+  MySubrange = a.b * 2 div 1 .. 100;
+  My2 = 1>2..True;
+  My3 = sizeof(Integer)..Sizeof(Double)
+  }
   Self.StateSet(psInTypeExpr, S1);
   Result := ParseExpr;
   Self.StateRestore(S1);
@@ -9371,6 +10351,7 @@ function TParser.ParseTypeRef: TType;
 var
   E: TExpr;
 begin
+  // CurToken is tkIdentifier / tkString
   if CurToken = tkString then
   begin
     Result := FContext.FStringType;
@@ -9381,6 +10362,8 @@ begin
   E := SimplifyQualId;
   FQId.Reset;
   Result := nil;
+  // todo 1: The problem here is that if Expr is not a type symbol, there will be an error
+  // as a: ptr
   if CheckExpr(E) then
   begin
     if E.OpCode = opMEMBER then
@@ -9431,13 +10414,21 @@ procedure TParser.ParseTypeSection(Parent: TSymbol);
           Resolved := FContext.FIntegerType;
         TPointerType(typ).RefType := Resolved;
       end;
-      Ref.Free;
+      Ref.Free; // this type is not added to FNodes
       Ref := Typ;
       Typ := TType(Typ.Next);
       Ref.Next := nil;
     end;
   end;
 
+{ procedure NextT;
+  var
+    StateInfo: TParseStateInfo;
+  begin
+    StateSet(psInClass, StateInfo);
+    NextToken;
+    StateRestore(StateInfo);
+  end; }
 var
   Typ, T2: TType;
   StateInfo: TParseStateInfo;
@@ -9452,7 +10443,13 @@ var
   end;
 
 begin
-  NextToken;
+  {
+  <TypeSection>		::= TYPE <TypeDeclList>
+
+  <TypeDeclList>		::= <TypeDecl>
+  			  | <TypeDeclList>  <TypeDecl>
+  }
+  NextToken; // skip 'type'
   Expect(tkIdentifier);
   StateSet(psInType, StateInfo);
   Unresolved := nil;
@@ -9467,6 +10464,7 @@ begin
     case CurToken of
       tkClass:
       begin
+        // In class, private and the like become keywords to prevent Scanner from scanning these words for generic identifiers
         Scanner.EnableScopeKeyWords(True);
         NextToken;
         if CurToken = tkOf then
@@ -9527,7 +10525,7 @@ begin
 end;
 
 procedure TParser.ParseUnitImplementation;
-
+  // Add the one marked as saInternal in Symbols to InternalSymbols;
   procedure CleanupSym;
   var
     globalst, localst: TSymbolTable;
@@ -9641,7 +10639,8 @@ begin
   Expect(tkDot);
   FCurParent := nil;
   FCurStates := [];
-  LeaveScope;
+  LeaveScope;  // pop global symbols
+  // Check that all declarations are implemented
   CheckForward;
   if FErrorCount = 0 then
   begin
@@ -9680,12 +10679,17 @@ procedure TParser.ParseUnitInterface(M: TModule);
   end;
 
 begin
+  {
+  <Unit>			::= <UnitHeader>  <InterfaceSection> <ImplementationSection> <InitSection> '.'
+  <UnitHeader>		::= UNIT <QualId> <OptPortDirectives> ';'
+  }
   if CurToken <> tkUnit then
     NextToken;
   Expect(tkUnit);
-  NextToken;
+  NextToken; // skip 'unit'
   FModule := M;
   FModule.TimeStamp := FScanner.TimeStamp;
+  // Analysis unit name
   ParseQualifiedId;
   if FQId.CountOfNames = 1 then
     FModule.Name := FQID.Name
@@ -9719,6 +10723,7 @@ begin
     FModule.LoadedUnits.Add(FContext.FSystemUnit);
   end;
   FCurParent := FModule;
+  //  SetTempExpr(True);
   ParseInterfaceSection;
   Expect(tkImplementation);
 end;
@@ -9730,7 +10735,12 @@ var
 begin
   if FIsSystemUnit then
     ParseError(SErr_SystemUnitUsesOthers, True);
-  NextToken;
+  {
+  <UsesClause>		::= USES <IdList> ';'
+  			  | SynError
+  }
+  NextToken; // skip 'uses'
+  // todo 5: Ignore the use in statement for the time being
   while True do
   begin
     Expect(tkIdentifier);
@@ -9751,14 +10761,14 @@ begin
     NextToken;
     if CurToken <> tkComma then
       Break;
-    NextToken;
+    NextToken; // skip tkComma
   end;
   Expect(tkSemicolon);
   NextToken;
 end;
 
 procedure TParser.ParseVarSection(Parent: TSymbol);
-
+  // todo 1: There is a problem, sometimes you need to return TMultiAccessor
   function ParseAbsVar: TSymbol;
 
     function FindField(Typ: TType; const S: string): TSymbol;
@@ -9777,6 +10787,19 @@ procedure TParser.ParseVarSection(Parent: TSymbol);
     I: integer;
     Sym: TSymbol;
   begin
+    {
+    type
+      TMyD = record
+        a: string[20];
+      end;
+      PMyd = ^TMyd;
+    var
+      D: TmyD;
+      P: PMyd = @D;
+      StrLen1: Byte absolute D.a;   // ok
+      StrLen2: Byte absolute D; // ok
+      StrLen3: Byte absolute P.a;   // error
+  }
     ParseQualifiedId;
     if FQId.CountOfNames = 1 then
       Result := FindSymbol(FQId.Name)
@@ -9837,19 +10860,34 @@ procedure TParser.ParseVarSection(Parent: TSymbol);
 var
   Typ, ValT: TType;
   Variable, V1: TVariable;
+  //  E: TExpr;
+  //  HasVal: Boolean;
   IsTls: boolean;
   Hints: TMemberHints;
   StateInfo: TParseStateInfo;
 begin
+  {
+  <VarSection>		::= VAR <VarDeclList>
+
+  <VarDeclList>		::= <VarDecl>
+  			  | <VarDeclList>  <VarDecl>
+
+  <VarDecl>		::= <IdList> ':' <Type> <OptAbsoluteClause> <OptPortDirectives> ';'
+  			  | <IdList> ':' <Type> '=' <TypedConstant> <OptPortDirectives> ';'
+  			  | <IdList> ':' <TypeSpec>
+  			  | SynError ';'
+  }
+  // current token is tkType
   IsTls := CurToken = tkThreadVar;
-  NextToken;
+  NextToken; // skip 'var' / 'threadvar'
   Expect(tkIdentifier);
   StateSet(psInVar, StateInfo);
   while CurToken = tkIdentifier do
   begin
+    // parse variable list
     Variable := TVariable(ParseIdList(TVariable));
     Expect(tkColon);
-    NextToken;
+    NextToken; // skip ':'
     Typ :=
       ParseTypeDecl;
     Hints := [];
@@ -9865,15 +10903,18 @@ begin
         ParseError(SErr_InitAbsoluteVar);
     end
     else
+    //    if CurToken = tkIdentifier then // parse hint
       Hints := ParseHints;
+    //    HasVal := False;
     if CurToken = tkEqual then
     begin
       if IsTls then
         ParseError(SErr_ThreadVarInit, True);
       if Assigned(Variable.Next) then
         ParseError(SErr_MultiVariablesInit, True);
-      NextToken;
+      NextToken; // skip '=';
       ValClear(FTempValue);
+      // parse init value
       case Typ.TypeCode of
         typArray:
         begin
@@ -9902,6 +10943,8 @@ begin
     end;
     V1 := Variable;
     repeat
+      //      if HasVal then
+      //        V1.Value := ValCopy(FTempValue);
       V1.VarType := Typ;
       V1.Hints := Hints;
       V1.Visibility := Self.FCurVisibility;
@@ -9925,7 +10968,7 @@ function TParser.ParseWhileStmt: TWhileStmt;
 var
   StateInfo: TParseStateInfo;
 begin
-  NextToken;
+  NextToken; // skip 'while'
   Result := TWhileStmt(CreateStmt(TWhileStmt));
   Result.Condition := ParseExpr;
   CheckBoolExpr(Result.Condition);
@@ -9958,7 +11001,7 @@ var
   AssStmt: TAssignmentStmt;
   Stmt: TStatement;
 begin
-  NextToken;
+  NextToken; // skip 'with'
   Deepth := FWithList.Count;
   Result := TCompoundStmt(CreateStmt(TCompoundStmt));
   repeat
@@ -9968,6 +11011,15 @@ begin
       Expect(tkComma);
       NextToken;
     end;
+    {
+      with getobj(a,b) do
+        dosome;
+      ==> Expands to:
+      $with1 = getobj(a,b);
+      $with1.dosome;
+    }
+    // Consider how you should proceed with the analysis if E is invalid
+    // Processing: E.Typ = TObject
     if not CheckExpr(E) then
       E.Typ := FContext.FTObjectType
     else if not (E.Typ.TypeCode in [typClass, typInterface, typRecord, typObject]) then
@@ -9975,10 +11027,12 @@ begin
       E.Typ := FContext.FTObjectType;
       ParseError(SErr_ExpectStructType);
     end;
-    if E.OpCode = opSYMBOL then
+    if E.OpCode = opSYMBOL then // In this case, E points to a Var/const
       EnterWithStmt(TSymbolExpr(E))
     else
     begin
+      // Create a new local variable
+      // If the pointer is to record or object, only the pointer is used
       V := TVariable(CreateElement(TVariable));
       V.Name := GetUniqueLocalName;
       if E.OpCode = opINST then
@@ -9992,6 +11046,7 @@ begin
         V.VarType := E.Typ;
       Include(V.VarAttr, vaHidden);
       AddSymbol(V);
+      // Then create a new assignment statement, (if E is already invalid, then the assignment is invalid as well)
       AssStmt := TAssignmentStmt(CreateStmt(TAssignmentStmt));
       AssStmt.Left := CreateSymbolExpr(V.Name);
       AssStmt.Left.Typ := V.VarType;
@@ -10014,10 +11069,11 @@ begin
       Result.Statements.Add(AssStmt);
     end;
   until CurToken = tkDo;
-  NextToken;
+  NextToken; // skip 'do'
   Stmt := ParseStatement(Result);
   if Stmt <> nil then
     Result.Statements.Add(Stmt);
+  // leave scope
   while Deepth < FWithList.Count do
     LeaveWithStmt;
 end;
@@ -10068,16 +11124,22 @@ var
   I: integer;
   InValid: boolean;
 begin
-  if FindWith(FQId.Names[0], Prefix, Sym) then
+  // Simplifications such as System.SysUtils.TStrings for this fully qualified identity
+  // Take TStrings directly
+  // If the System.SysUtils.TStrings identifier is invalid, it is not simplified
+  if FindWith(FQId.Names[0], Prefix, Sym) then // in the with statement
   begin
     Prefix := CloneSymbolExpr(Prefix);
     if Prefix.Typ.TypeCode = typPointer then
     begin
+      // dereference
       Result := CreateUnaryExpr(opINST, Prefix);
       Result.Typ := TPointerType(Prefix.Typ).RefType;
+      //  Include(Result.Attr, eaVerified);
     end
     else
       Result := Prefix;
+     // concat with Sym
     for I := 0 to
       FQId.CountOfNames - 1 do
       Result := CreateBinaryExpr(opMEMBER, Result, CreateSymbolExpr(FQId.Names[I]));
@@ -10098,8 +11160,14 @@ begin
     end;
     Result := nil;
     InValid := False;
+    // If the identifier does not point to a valid symbol, the expression is not refined, but it is marked as invalid
     if (Sym = nil) or (Sym.NodeKind in [nkModule, nkNameScope]) or (I > FQId.CountOfNames) then
     begin
+    // Don't report an error, wait for CheckExpr
+    {  if Sym = nil then
+        ParseError(SErr_UndeclaredIdent, [FQId.Names[I-1]])
+      else
+        ParseError(SErr_InvalidIdent, [Sym.Name]);}
       I := 0;
       InValid := True;
     end
@@ -10172,7 +11240,7 @@ const
       Ret := TEnumType(Typ).HighValue
     else if Typ.TypeCode = typSubrange then
       Ret := TSubrangeType(Typ).RangeEnd
-    else if Typ.TypeCode = typArray then
+    else if Typ.TypeCode = typArray then // typDynamicArray Constant evaluation does not work on dynamic arrays
       Ret := TArrayType(Typ).Range.RangeEnd
     else if Typ.IsAnsiShortString or Typ.IsWideShortString then
       Ret := TStringType(Typ).CharCount - 1
@@ -10203,7 +11271,7 @@ const
       Ret := TEnumType(Typ).LowValue
     else if Typ.TypeCode = typSubrange then
       Ret := TSubrangeType(Typ).RangeBegin
-    else if Typ.TypeCode = typArray then
+    else if Typ.TypeCode = typArray then // typDynamicArray Constant evaluation does not work on dynamic arrays
       Ret := TArrayType(Typ).Range.RangeBegin
     else if Typ.IsAnsiShortString or Typ.IsWideShortString then
       Ret := 1
@@ -10226,14 +11294,17 @@ const
   begin
     Typ := E.Typ;
     case Typ.TypeCode of
-      typArray: Result := TArrayType(Typ).Range.RangeEnd - TArrayType(Typ).Range.RangeBegin + 1;
-      typString: if TStringType(Typ).IsShortString then
+      typArray: // typDynamicArray Cannot be used for constant estimation
+        Result := TArrayType(Typ).Range.RangeEnd - TArrayType(Typ).Range.RangeBegin + 1;
+      typString:
+        if TStringType(Typ).IsShortString then
           Result := TStringType(Typ).CharCount
         else
         begin
           ValInit(V);
           try
             GetValue(E, V);
+            // todo 1: If in Ansi mode, it should be converted to RawStr before getting the value
             Result := Length(ValToStr(V));
           finally
             ValClear(V);
@@ -10245,6 +11316,8 @@ const
     end;
   end;
 
+  // For example: Sizeof(['a'..'g']);
+  // If there is an Expr that cannot be a value, it is treated as 32
   function SizeOfSetLiteral(E: TExpr): integer;
   var
     V: TValueRec;
@@ -10260,6 +11333,7 @@ const
     end;
   end;
 
+  // sizeof can be used for types, variables, procedure/function names, and constant expressions
   function CallSizeOf(E: TExpr): cardinal;
   var
     Ref: TSymbol;
@@ -10360,7 +11434,7 @@ const
             Value := ValPred(V);
         bfRound: if CheckNum(V, 'round') then
             Value := ValRound(V);
-        bfSizeOf: Value := ValFromInt(int64(CallSizeOf(A1)));
+        bfSizeOf: Value := ValFromInt(int64(CallSizeOf(A1))); // ValFromInt(A1.Typ.Size);
         bfSucc: if CheckOrd(V, 'succ') then
             Value := ValSucc(V);
         bfSwap: if CheckInt(V, 'swap') and CheckIntTyp(A1, 'swap') then
@@ -10395,12 +11469,15 @@ const
     end;
   end;
 
+  // Calculate array element offset
   function CalcOffset(E: TExpr; T: TType; var Offset: int64): boolean;
   var
     i: integer;
     c, size: int64;
     V: TValueRec;
   begin
+    // arr: array[0..1, 0..2] of byte;
+    // @arr[1, 2];
     Assert(E.OpCode = opLIST, 'TryEvalConst$CalcOffset: Expect E.OpCode=opLIST');
     Assert(T.TypeCode = typArray, 'TryEvalConst$CalcOffset: Expect T.TypeCode=typArray');
     Result := False;
@@ -10421,6 +11498,8 @@ const
     Result := True;
   end;
 
+  // Determine whether the expression can be decomposed into a symbol address and offset
+  // Scenario assumption: var p: Pointer = @rec.a[1,2].val;
   function GetOffsetSym(E: TExpr; out S: TSymbol; out Offset: int64): boolean;
   var
     Ref: TSymbol;
@@ -10434,6 +11513,7 @@ const
         opSYMBOL:
         begin
           Ref := TSymbolExpr(E).reference;
+          // variables, parameters, functions
           if Ref.NodeKind in [nkVariable, nkFuncParam, nkFunc, nkMethod, nkExternalFunc] then
           begin
             S := Ref;
@@ -10486,6 +11566,7 @@ const
     V: TValueRec;
   begin
     F := bin.Left.GetReference;
+    // CheckExpr has ensured that F.NodeKind = nkType
     if (F = nil) or (F.NodeKind <> nkType) then
       raise EEvalConstant.CreateCoord(bin.Coord, 'DoCast: Expect F is type');
     F := TType(F).NormalType;
@@ -10580,6 +11661,8 @@ const
       for J := 0 to List.Count - 1 do
       begin
         Item := List.Items[J];
+        // No need to judge. GetValue below automatically judges whether it is a constant
+        // if not (eaConst in Item.Attr) then Exit;
         if Item.OpCode = opRANGE then
         begin
           ValClear(V1);
@@ -10635,10 +11718,13 @@ begin
     end;
     Result := True;
   except
+    // Check that the expression is not a constant, and return False without processing
     on ENotConstant do
       Result := False;
+    // If EParserError is thrown, this message needs to be displayed with the specified Coord
     on Ex: EParserError do
       Err(Ex);
+    // Others such as Assert, EASTError, indicating an error
     on Ex: Exception do
       InternalError(Ex.Message);
   end;
